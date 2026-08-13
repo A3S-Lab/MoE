@@ -1,0 +1,137 @@
+# MoE Inference Architecture
+
+## Goals
+
+The engine targets correct, bounded-memory inference for sparse MoE models on
+CPU, accelerators, and confidential-computing hosts. It adopts the useful
+Colibri pattern—storage, RAM, and device tiers with just-in-time expert
+movement—without coupling generic Power runtime code to one model family.
+
+The initial model is OLMoE. A second architecture is admitted only after the
+boundary has proven that model-owned semantics can change without modifying
+Power's residency core.
+
+## Ownership
+
+| Concern | Owner |
+| --- | --- |
+| Model configuration and tensor aliases | `a3s-moe` |
+| Router math and exact top-k selection | `a3s-moe` |
+| Attention, expert kernels, KV cache, tokenizer | `a3s-moe` |
+| Packed expert header and quantization interpretation | `a3s-moe` |
+| Admission, cancellation, and continuous batching | `a3s-power` |
+| Storage/RAM/device residency and eviction | `a3s-power` |
+| Weight source integrity and TEE evidence | `a3s-power` |
+| OpenAI-compatible transport | `a3s-power`, composed downstream |
+
+Dependency direction is one way: `a3s-moe -> a3s-power`. Power never imports a
+model implementation. The `a3s-moe` service binary injects its typed backend
+through `PowerServerBuilder`.
+
+## Numerical Invariants
+
+OLMoE inference follows the reference order:
+
+1. Compute router logits with a bias-free linear projection.
+2. Apply softmax across all experts in F32.
+3. Select exactly `num_experts_per_tok` experts.
+4. Keep selected full-softmax probabilities when `norm_topk_prob` is false.
+5. Split fused `gate_up_proj` into gate rows followed by up rows.
+6. Compute `down(silu(gate(x)) * up(x))` for each selected expert.
+7. Multiply by that route's weight and add into the original token position.
+
+The Power batch union is solely an I/O schedule. It cannot alter steps 2–7.
+Duplicate, out-of-range, empty, or non-finite routes fail closed.
+
+## Weight Representations
+
+The correctness path first reads the published Hugging Face SafeTensor layout.
+Dense weights may remain ordinary tensors. Expert weights are addressed by
+layer and expert, even when the source checkpoint stores all experts in a
+single three-dimensional tensor.
+
+The streaming path adds a deterministic conversion tool. One packed expert
+record contains gate/up, down, scales, dtype identifiers, dimensions, and
+offsets. The complete record is stored as one `U8` SafeTensor so Power can
+verify, stage, and cache it atomically. The record format is versioned and
+digest-bound. Unsupported versions and dimension mismatches fail before
+execution.
+
+Only `WeightHierarchy` owns resident bytes. Model code may hold short-lived
+views for the current operation but cannot retain a parallel byte cache.
+
+## Execution Flow
+
+```text
+tokens -> embedding -> decoder layer
+                         |
+                         +-> attention + KV cache
+                         |
+                         +-> router -> exact RoutedExpertBatch
+                                         |
+                                         v
+                         route-coupled microbatch union
+                                         |
+                                         v
+                         Power stages each expert once
+                                         |
+                                         v
+                         model kernel dispatch + weighted reduction
+```
+
+The CPU correctness backend executes one request without approximation. Later
+milestones reuse the same oracle for batched, streaming, and accelerator paths.
+
+## Delivery Milestones
+
+### M0: Contract and Oracle
+
+- Validate official OLMoE geometry.
+- Pin a tiny independent numerical oracle.
+- Prove one packed `U8` expert survives Power staging byte-for-byte.
+- Establish typed downstream backend composition.
+
+### M1: CPU Correctness
+
+- Load published SafeTensor indexes and sharded tensors.
+- Implement embeddings, RMSNorm, Q/K normalization, RoPE, causal attention,
+  sparse MLP layers, final norm, and LM head.
+- Add prefill/decode KV cache and deterministic greedy generation.
+- Compare layer outputs, logits, routes, and generated token IDs with a pinned
+  Transformers reference.
+
+### M2: Streaming Residency
+
+- Convert experts into versioned atomic records.
+- Map exact routes to Power weight requests.
+- Overlap next expert/layer reads with current compute under cancellation.
+- Demonstrate a bounded peak resident set and no second model cache.
+
+### M3: Continuous Batching
+
+- Combine compatible request slots while preserving per-token routes.
+- Read every unioned expert at most once per layer step.
+- Preserve single-request parity across admission, cancellation, and slot
+  compaction.
+
+### M4: Service and Performance
+
+- Implement the Power `Backend` adapter and an `a3s-moe` server binary.
+- Add tokenizer/chat-template and OpenAI chat/completions streaming.
+- Publish cold/warm throughput, time-to-first-token, bytes read, and peak RAM
+  against the CPU baseline.
+
+### M5–M7: Accelerator, TEE, and Second Architecture
+
+- Add device execution with CPU parity and declared fallback evidence.
+- Add seekable encrypted expert reads and TEE memory acceptance.
+- Add a second MoE family without changing Power's model-neutral contracts.
+
+## Acceptance Gates
+
+Every optimized path must retain exact expert IDs and match reference route
+weights and logits within a declared dtype-specific tolerance. Tests must cover
+malformed configs, truncated/corrupt weights, cancellation, cache pressure,
+mixed routes, and deterministic fallback. Performance claims require a checked
+benchmark artifact containing hardware, storage cache state, model digest,
+configuration, and raw samples.

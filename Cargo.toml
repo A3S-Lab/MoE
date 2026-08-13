@@ -1,0 +1,20 @@
+[package]
+name = "a3s-moe"
+version = "0.1.0"
+edition = "2021"
+authors = ["A3S Lab"]
+license = "MIT"
+repository = "https://github.com/A3S-Lab/MoE"
+description = "Model-owned mixture-of-experts inference for A3S Power"
+readme = "README.md"
+keywords = ["llm", "moe", "inference", "olmoe"]
+categories = ["science"]
+
+[dependencies]
+a3s-power = { git = "https://github.com/A3S-Lab/Power.git", rev = "7ce6fa5", default-features = false, features = ["embedded-inference"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+[dev-dependencies]
+approx = "0.5"
