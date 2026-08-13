@@ -22,6 +22,24 @@
 - Complete streaming decoder logits and routes match the fully resident model
   within `2e-5`, including BF16 source conversion and greedy decode.
 
+### Public-checkpoint oracle
+
+`tools/generate_public_oracle.py` imports Transformers only from a Git checkout
+whose `HEAD` is the pinned revision. It loads the pinned checkpoint as F32 on
+CPU with eager attention and captures all prompt logits, all per-layer router
+logits, and the exact top-k expert IDs and full-softmax weights. Its file
+inventory binds the config, index, tokenizer, and every SafeTensor shard by
+byte length and SHA-256.
+
+`a3s-moe-validate` re-hashes that inventory before loading the resident Rust
+model. It then checks tokenizer IDs, every numerical value, every token argmax,
+and every selected expert. Structurally valid comparisons produce
+`a3s.moe.olmoe-validation.v1` JSON even when a numerical gate fails; a failed
+report also causes a non-zero process exit. Default absolute tolerances are
+`2e-2` for output and router logits and `2e-4` for route weights. The committed
+public artifact records the observed maxima so these bounds can be tightened
+from evidence rather than guessed.
+
 ## Streaming Residency Gates
 
 - Each selected expert maps to exactly one atomic Power staged group.

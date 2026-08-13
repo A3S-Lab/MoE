@@ -37,3 +37,6 @@ All notable changes to this project are documented in this file.
 - `a3s-moe-bench` JSON evidence for first/warm TTFT and throughput, Power expert
   I/O/cache telemetry, peak RSS, and an isolated resident CPU baseline.
 - Service, benchmark, and real HTTP subprocess regression coverage.
+- Pinned-Transformers public-checkpoint oracle generation plus an
+  integrity-bound `a3s-moe-validate` CLI that reports full logits, router, and
+  route parity as versioned JSON evidence.

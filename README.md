@@ -106,6 +106,24 @@ the 13.8 GB payload:
 python tools/verify_hf_contract.py
 ```
 
+Generate and verify the full public-checkpoint numerical oracle from the exact
+pinned Transformers checkout:
+
+```shell
+PYTHONPATH=/src/transformers/src python tools/generate_public_oracle.py \
+  /models/OLMoE-1B-7B-0924 tests/fixtures/olmoe_public_oracle.json
+cargo run --release --features validation --bin a3s-moe-validate -- \
+  /models/OLMoE-1B-7B-0924 tests/fixtures/olmoe_public_oracle.json \
+  > olmoe-validation.json
+```
+
+The generator refuses a Transformers Git checkout other than
+`918dbf131d0df5b46e3f6e1d96174d62aa4d16d6`. The oracle binds every checkpoint
+file by SHA-256 and captures every prompt logit, router logit, selected expert,
+and route weight. The validator exits non-zero on provenance, tokenizer,
+argmax, route, or tolerance failure and always emits a versioned JSON report
+for a structurally valid numerical comparison.
+
 Convert a downloaded Hugging Face checkpoint without buffering a complete
 layer or model:
 

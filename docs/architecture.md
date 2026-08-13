@@ -110,6 +110,9 @@ milestones reuse the same oracle for batched, streaming, and accelerator paths.
   generation.
 - Implemented: pinned equation-level logits/routes oracle and
   prefill-versus-incremental parity.
+- Implemented: integrity-bound public-oracle generation and a fail-closed
+  resident Rust validator for full logits, router logits, routes, and tokenizer
+  IDs.
 - Pending acceptance: run the complete 13.8 GB pinned public checkpoint against
   Transformers token IDs and logits on a sufficiently provisioned host.
 

@@ -8,6 +8,8 @@ mod router;
 mod sampling;
 mod streaming;
 mod tokenizer;
+#[cfg(feature = "validation")]
+mod validation;
 
 pub use checkpoint::OlmoeCheckpoint;
 pub use config::{OlmoeConfig, OlmoeMoeConfig};
@@ -27,3 +29,10 @@ pub use streaming::{
     PackedScalarType,
 };
 pub use tokenizer::{OlmoeDecodeStream, OlmoeTokenizer};
+#[cfg(feature = "validation")]
+pub use validation::{
+    validate_public_checkpoint, OlmoeNumericComparison, OlmoeOracleFile, OlmoeOracleInput,
+    OlmoeOracleModel, OlmoeOracleOutput, OlmoeOracleRoute, OlmoePublicOracle,
+    OlmoeValidationReport, OlmoeValidationStatus, OlmoeValidationTolerances, OLMOE_PUBLIC_MODEL_ID,
+    OLMOE_PUBLIC_MODEL_REVISION, OLMOE_PUBLIC_ORACLE_SCHEMA, OLMOE_TRANSFORMERS_REVISION,
+};
