@@ -128,10 +128,17 @@ milestones reuse the same oracle for batched, streaming, and accelerator paths.
 
 ### M3: Continuous Batching
 
-- Combine compatible request slots while preserving per-token routes.
-- Read every unioned expert at most once per layer step.
-- Preserve single-request parity across admission, cancellation, and slot
-  compaction.
+- Implemented: ragged rows may have different token widths and absolute KV
+  positions; their attention and cache updates remain session-local.
+- Implemented: normalized MLP rows flatten into one layer input, so the exact
+  route union stages every active expert once before results are split back to
+  canonical rows.
+- Implemented: Power's fair execution lifecycle owns per-member permits,
+  admission ordering, cancellation boundaries, aggregate state limits, and
+  digest-only step transcripts.
+- Implemented: the model scheduler commits lifecycle metadata before
+  publishing continuing KV state, compacts completed/cancelled slots, and
+  accepts new members for the next immutable roster.
 
 ### M4: Service and Performance
 

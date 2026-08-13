@@ -18,7 +18,10 @@ pub use packed_checkpoint::{
 };
 pub use router::{OlmoeRouter, OlmoeRouterOutput};
 pub use streaming::{
-    packed_expert_tensor_name, OlmoeStreamingForwardOutput, OlmoeStreamingMlp,
-    OlmoeStreamingMlpOutput, OlmoeStreamingModel, PackedExpertRecord, PackedScalarType,
+    packed_expert_tensor_name, OlmoeContinuousBatch, OlmoeContinuousRequest,
+    OlmoeContinuousRowOutput, OlmoeContinuousStepOutput, OlmoeStreamingBatchOutput,
+    OlmoeStreamingBatchRow, OlmoeStreamingBatchRowOutput, OlmoeStreamingForwardOutput,
+    OlmoeStreamingMlp, OlmoeStreamingMlpOutput, OlmoeStreamingModel, PackedExpertRecord,
+    PackedScalarType,
 };
 pub use tokenizer::OlmoeTokenizer;

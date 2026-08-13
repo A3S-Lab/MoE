@@ -37,6 +37,20 @@
 - Reopening a packed checkpoint verifies exact dense and expert file
   inventories plus collection digests before model construction.
 
+## Continuous Batching Gates
+
+- Two sessions at different KV positions, with different token widths, produce
+  the same logits and per-token routes as isolated streaming forwards.
+- Each layer's staging report requests exactly the cardinality of the unioned
+  expert set, with one weight request per expert.
+- Fair multi-round greedy generation matches isolated generation while a
+  cancelled member releases its permit and a new member joins the next roster.
+- Cancellation through either the scheduler API or the original member token
+  is reaped before the next arithmetic step; remaining rows commit normally.
+- Lifecycle evidence accounts for three admissions, two completions, one
+  cancellation, three committed steps, five processed rows, and zero leaked
+  permits in the regression fixture.
+
 ## Public Checkpoint Metadata
 
 `tools/verify_hf_contract.py` uses bounded HTTP range requests to parse only the

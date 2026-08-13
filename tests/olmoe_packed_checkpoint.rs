@@ -119,6 +119,11 @@ async fn deterministic_conversion_loads_a_bounded_streaming_model() {
 
     let runtime = EmbeddedRuntime::new(DevicePreference::Cpu, limits).unwrap();
     let packed = OlmoePackedCheckpoint::open(&packed_path, runtime.clone()).unwrap();
+    assert_eq!(
+        packed.execution_batch_binding().unwrap(),
+        packed.execution_batch_binding().unwrap(),
+        "packed batch identity must be deterministic"
+    );
     let record_bytes = 64 + 3 * tiny_config().hidden_size * tiny_config().intermediate_size * 4;
     let model = packed
         .load_cpu_streaming(ResidencyPolicy {

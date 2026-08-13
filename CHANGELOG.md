@@ -23,3 +23,8 @@ All notable changes to this project are documented in this file.
 - Power-backed asynchronous expert staging, cache reuse and eviction,
   cancellation-safe full-decoder execution, and one-per-request admission.
 - `a3s-moe-pack` CLI with machine-readable conversion evidence.
+- Ragged expert-unioned forward batches with independent session KV caches and
+  isolated-execution numerical parity.
+- Continuous greedy scheduling on Power's fair execution lifecycle with
+  cancellation reaping, slot compaction, atomic state publication, and
+  digest-only evidence.

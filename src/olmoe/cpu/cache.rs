@@ -38,6 +38,31 @@ impl OlmoeKvCache {
         self.max_position_embeddings
     }
 
+    /// Exact bytes currently referenced by key/value tensors in this session.
+    pub fn resident_bytes(&self) -> Result<u64> {
+        self.layers.iter().try_fold(0_u64, |total, layer| {
+            [&layer.key, &layer.value]
+                .into_iter()
+                .flatten()
+                .try_fold(total, |total, tensor| {
+                    let bytes = tensor
+                        .elem_count()
+                        .checked_mul(tensor.dtype().size_in_bytes())
+                        .and_then(|bytes| u64::try_from(bytes).ok())
+                        .ok_or_else(|| {
+                            MoeError::InvalidTensor(
+                                "KV cache resident byte count overflowed".to_string(),
+                            )
+                        })?;
+                    total.checked_add(bytes).ok_or_else(|| {
+                        MoeError::InvalidTensor(
+                            "KV cache aggregate byte count overflowed".to_string(),
+                        )
+                    })
+                })
+        })
+    }
+
     pub fn reset(&mut self) {
         for layer in &mut self.layers {
             *layer = LayerKvCache::default();
@@ -104,5 +129,6 @@ mod tests {
         cache.reset();
         assert_eq!(cache.position(), 0);
         assert!(cache.validate_step(2, 2, 1).is_ok());
+        assert_eq!(cache.resident_bytes().unwrap(), 0);
     }
 }

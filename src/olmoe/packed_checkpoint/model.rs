@@ -2,7 +2,10 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use a3s_power::inference::{EmbeddedRuntime, ResidencyPolicy, WeightHierarchy, WeightStore};
+use a3s_power::inference::{
+    EmbeddedRuntime, ExecutionBatchBinding, ExecutionDigest, ResidencyPolicy, WeightHierarchy,
+    WeightStore,
+};
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
 
@@ -92,6 +95,31 @@ impl OlmoePackedCheckpoint {
 
     pub fn runtime(&self) -> &EmbeddedRuntime {
         &self.runtime
+    }
+
+    /// Digest-only identity for Power's continuous execution lifecycle.
+    pub fn execution_batch_binding(&self) -> Result<ExecutionBatchBinding> {
+        let weights = ExecutionDigest::utf8_text(&format!(
+            "{}\0{}\0{}\0{}",
+            self.manifest.schema,
+            self.manifest.source_weights_sha256,
+            self.manifest.dense_weights_sha256,
+            self.manifest.expert_weights_sha256,
+        ));
+        let state_layout = ExecutionDigest::utf8_text(&format!(
+            "a3s-moe-olmoe-kv-cache-f32-v1\0{}\0{}\0{}\0{}",
+            self.config.num_hidden_layers,
+            self.config.num_key_value_heads,
+            self.config.hidden_size / self.config.num_attention_heads,
+            self.config.max_position_embeddings,
+        ));
+        let scheduler =
+            ExecutionDigest::utf8_text("a3s-moe-olmoe-ragged-expert-union-greedy-scheduler-v1");
+        Ok(ExecutionBatchBinding::new(
+            weights.sha256,
+            state_layout.sha256,
+            scheduler.sha256,
+        )?)
     }
 
     pub fn load_tokenizer(&self) -> Result<OlmoeTokenizer> {

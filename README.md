@@ -13,8 +13,8 @@ active parameters.
 
 ## Current Status
 
-The M0 numerical contract, resident M1 CPU engine, and bounded M2 expert
-streaming path are implemented and tested:
+The M0 numerical contract, resident M1 CPU engine, bounded M2 expert streaming,
+and M3 continuous batching path are implemented and tested:
 
 - Hugging Face compatible OLMoE configuration parsing and strict geometry
   validation.
@@ -45,9 +45,15 @@ streaming path are implemented and tested:
 - One Power admission permit per generation request, transactional cancellation,
   measured cache bounds, and resident-versus-streaming parity for prefill and
   incremental greedy decode.
+- Ragged continuous batches with independent per-session attention/KV state,
+  one route-unioned expert staging operation per layer, and canonical per-row
+  outputs matching isolated inference.
+- A fair greedy scheduler built on Power's execution lifecycle, including
+  bounded admission, direct cancellation-token reaping, slot compaction,
+  exact KV state-byte accounting, and digest-only step/lifecycle evidence.
 
 This is a bounded expert-residency engine, not yet a production serving stack.
-Continuous batching, sampling, chat templates, and the Power HTTP backend are
+Sampling, chat templates, the Power HTTP backend, and performance evidence are
 the next milestones. Dense weights remain resident in the current CPU path.
 The 13.8 GB public checkpoint's metadata contract is verified without
 downloading weight payloads; a full real-checkpoint conversion and numerical

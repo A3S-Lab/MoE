@@ -177,6 +177,7 @@ pub fn tiny_weights(config: &OlmoeConfig) -> HashMap<String, Tensor> {
     weights
 }
 
+#[allow(dead_code)]
 pub fn tiny_model() -> OlmoeCpuModel {
     let config = tiny_config();
     let weights = tiny_weights(&config);

@@ -25,8 +25,8 @@ pub struct OlmoeStreamingForwardOutput {
 /// experts managed by one Power hierarchy.
 #[derive(Debug, Clone)]
 pub struct OlmoeStreamingModel {
-    dense: OlmoeDenseModel,
-    mlps: Vec<OlmoeStreamingMlp>,
+    pub(super) dense: OlmoeDenseModel,
+    pub(super) mlps: Vec<OlmoeStreamingMlp>,
     hierarchy: WeightHierarchy,
 }
 
