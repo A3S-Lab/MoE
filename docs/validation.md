@@ -4,6 +4,8 @@
 
 - Transformers OLMoE equations:
   `918dbf131d0df5b46e3f6e1d96174d62aa4d16d6`
+  (`modeling_olmoe.py` SHA-256
+  `53a94a479f9904674a5f45aba0387c13466a1f2a2d3cdb9226f9cf58946ebbf8`)
 - OLMoE-1B-7B-0924 checkpoint:
   `6d84c48581ece794365f2b8e9cfb043c68ade9c5`
 - A3S Power composition, process-local manifest, and packed-record contract:
@@ -25,7 +27,8 @@
 ### Public-checkpoint oracle
 
 `tools/generate_public_oracle.py` imports Transformers only from a Git checkout
-whose `HEAD` is the pinned revision. It loads the pinned checkpoint as F32 on
+whose `HEAD` and OLMoE source SHA-256 match the pinned values. It loads the
+pinned checkpoint as F32 on
 CPU with eager attention and captures all prompt logits, all per-layer router
 logits, and the exact top-k expert IDs and full-softmax weights. Its file
 inventory binds the config, index, tokenizer, and every SafeTensor shard by

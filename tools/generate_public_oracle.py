@@ -23,6 +23,9 @@ ORACLE_SCHEMA = "a3s.moe.olmoe-public-oracle.v1"
 MODEL_ID = "allenai/OLMoE-1B-7B-0924"
 MODEL_REVISION = "6d84c48581ece794365f2b8e9cfb043c68ade9c5"
 TRANSFORMERS_REVISION = "918dbf131d0df5b46e3f6e1d96174d62aa4d16d6"
+TRANSFORMERS_SOURCE_SHA256 = (
+    "53a94a479f9904674a5f45aba0387c13466a1f2a2d3cdb9226f9cf58946ebbf8"
+)
 DEFAULT_PROMPT = "Bitcoin is"
 READ_CHUNK_BYTES = 8 * 1024 * 1024
 
@@ -69,7 +72,13 @@ def verified_transformers_source() -> tuple[str, str]:
         raise RuntimeError(
             f"Transformers checkout is {revision}, expected {TRANSFORMERS_REVISION}"
         )
-    return revision, sha256_file(source)
+    source_sha256 = sha256_file(source)
+    if source_sha256 != TRANSFORMERS_SOURCE_SHA256:
+        raise RuntimeError(
+            "Transformers OLMoE source SHA-256 is "
+            f"{source_sha256}, expected {TRANSFORMERS_SOURCE_SHA256}"
+        )
+    return revision, source_sha256
 
 
 def regular_file(root: Path, name: str) -> Path:

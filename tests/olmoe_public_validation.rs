@@ -7,7 +7,7 @@ use std::process::Command;
 use a3s_moe::olmoe::{
     OlmoeCheckpoint, OlmoeOracleFile, OlmoeOracleInput, OlmoeOracleModel, OlmoeOracleOutput,
     OlmoeOracleRoute, OlmoePublicOracle, OLMOE_PUBLIC_MODEL_ID, OLMOE_PUBLIC_MODEL_REVISION,
-    OLMOE_PUBLIC_ORACLE_SCHEMA, OLMOE_TRANSFORMERS_REVISION,
+    OLMOE_PUBLIC_ORACLE_SCHEMA, OLMOE_TRANSFORMERS_REVISION, OLMOE_TRANSFORMERS_SOURCE_SHA256,
 };
 use candle_core::{Device, Tensor};
 use sha2::{Digest, Sha256};
@@ -78,7 +78,7 @@ fn write_oracle(root: &Path) -> OlmoePublicOracle {
             id: OLMOE_PUBLIC_MODEL_ID.to_string(),
             revision: OLMOE_PUBLIC_MODEL_REVISION.to_string(),
             transformers_revision: OLMOE_TRANSFORMERS_REVISION.to_string(),
-            transformers_source_sha256: "0".repeat(64),
+            transformers_source_sha256: OLMOE_TRANSFORMERS_SOURCE_SHA256.to_string(),
             files,
         },
         input: OlmoeOracleInput {
@@ -117,6 +117,23 @@ fn validation_cli_reports_passes_and_numerical_failures() {
     assert_eq!(report["schema"], "a3s.moe.olmoe-validation.v1");
     assert_eq!(report["status"], "passed");
     assert_eq!(report["routesChecked"], 16);
+
+    let mut invalid_provenance = oracle.clone();
+    invalid_provenance.model.transformers_source_sha256 = "0".repeat(64);
+    fs::write(
+        &oracle_path,
+        serde_json::to_vec_pretty(&invalid_provenance).unwrap(),
+    )
+    .unwrap();
+    let rejected = Command::new(env!("CARGO_BIN_EXE_a3s-moe-validate"))
+        .arg(&source)
+        .arg(&oracle_path)
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("Transformers source SHA-256 must be")
+    );
 
     oracle.output.logits[0][0] += 1.0;
     fs::write(&oracle_path, serde_json::to_vec_pretty(&oracle).unwrap()).unwrap();

@@ -35,4 +35,5 @@ pub use validation::{
     OlmoeOracleModel, OlmoeOracleOutput, OlmoeOracleRoute, OlmoePublicOracle,
     OlmoeValidationReport, OlmoeValidationStatus, OlmoeValidationTolerances, OLMOE_PUBLIC_MODEL_ID,
     OLMOE_PUBLIC_MODEL_REVISION, OLMOE_PUBLIC_ORACLE_SCHEMA, OLMOE_TRANSFORMERS_REVISION,
+    OLMOE_TRANSFORMERS_SOURCE_SHA256,
 };

@@ -6,6 +6,8 @@ pub const OLMOE_PUBLIC_ORACLE_SCHEMA: &str = "a3s.moe.olmoe-public-oracle.v1";
 pub const OLMOE_PUBLIC_MODEL_ID: &str = "allenai/OLMoE-1B-7B-0924";
 pub const OLMOE_PUBLIC_MODEL_REVISION: &str = "6d84c48581ece794365f2b8e9cfb043c68ade9c5";
 pub const OLMOE_TRANSFORMERS_REVISION: &str = "918dbf131d0df5b46e3f6e1d96174d62aa4d16d6";
+pub const OLMOE_TRANSFORMERS_SOURCE_SHA256: &str =
+    "53a94a479f9904674a5f45aba0387c13466a1f2a2d3cdb9226f9cf58946ebbf8";
 
 /// One integrity-bound file used to construct the independent oracle.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -118,9 +118,10 @@ cargo run --release --features validation --bin a3s-moe-validate -- \
 ```
 
 The generator refuses a Transformers Git checkout other than
-`918dbf131d0df5b46e3f6e1d96174d62aa4d16d6`. The oracle binds every checkpoint
-file by SHA-256 and captures every prompt logit, router logit, selected expert,
-and route weight. The validator exits non-zero on provenance, tokenizer,
+`918dbf131d0df5b46e3f6e1d96174d62aa4d16d6`, or an OLMoE source file whose
+SHA-256 differs from the pinned digest. The oracle binds every checkpoint file
+by SHA-256 and captures every prompt logit, router logit, selected expert, and
+route weight. The validator exits non-zero on provenance, tokenizer,
 argmax, route, or tolerance failure and always emits a versioned JSON report
 for a structurally valid numerical comparison.
 

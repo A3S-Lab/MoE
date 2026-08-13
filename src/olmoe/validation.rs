@@ -16,7 +16,7 @@ pub use schema::{
     OlmoeNumericComparison, OlmoeOracleFile, OlmoeOracleInput, OlmoeOracleModel, OlmoeOracleOutput,
     OlmoeOracleRoute, OlmoePublicOracle, OlmoeValidationReport, OlmoeValidationStatus,
     OlmoeValidationTolerances, OLMOE_PUBLIC_MODEL_ID, OLMOE_PUBLIC_MODEL_REVISION,
-    OLMOE_PUBLIC_ORACLE_SCHEMA, OLMOE_TRANSFORMERS_REVISION,
+    OLMOE_PUBLIC_ORACLE_SCHEMA, OLMOE_TRANSFORMERS_REVISION, OLMOE_TRANSFORMERS_SOURCE_SHA256,
 };
 
 const OLMOE_VALIDATION_SCHEMA: &str = "a3s.moe.olmoe-validation.v1";
@@ -182,10 +182,13 @@ fn validate_provenance(oracle: &OlmoePublicOracle) -> Result<()> {
             )));
         }
     }
-    validate_sha256(
-        &oracle.model.transformers_source_sha256,
-        "Transformers source",
-    )
+    if oracle.model.transformers_source_sha256 != OLMOE_TRANSFORMERS_SOURCE_SHA256 {
+        return Err(MoeError::InvalidConfig(format!(
+            "Transformers source SHA-256 must be '{OLMOE_TRANSFORMERS_SOURCE_SHA256}', found '{}'",
+            oracle.model.transformers_source_sha256
+        )));
+    }
+    Ok(())
 }
 
 fn validate_files(checkpoint: &OlmoeCheckpoint, files: &[OlmoeOracleFile]) -> Result<()> {
