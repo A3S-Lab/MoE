@@ -124,14 +124,9 @@ impl OlmoePackedCheckpoint {
         OlmoeTokenizer::from_file(self.root.join(TOKENIZER_FILE), self.config.vocab_size)
     }
 
-    /// Materializes dense F32 CPU weights once and connects streamed experts
-    /// to the sole Power residency hierarchy.
-    pub fn load_cpu_streaming(&self, policy: ResidencyPolicy) -> Result<OlmoeStreamingModel> {
-        if !self.runtime.device().tensor_device().is_cpu() {
-            return Err(MoeError::InvalidConfig(
-                "packed CPU streaming requires a CPU Power runtime".to_string(),
-            ));
-        }
+    /// Materializes dense F32 weights on the resolved Power device and
+    /// connects streamed experts to the sole Power residency hierarchy.
+    pub fn load_streaming(&self, policy: ResidencyPolicy) -> Result<OlmoeStreamingModel> {
         let mut tensors =
             HashMap::<String, Tensor>::with_capacity(self.dense_store.inventory().len());
         for descriptor in self.dense_store.inventory() {
@@ -146,6 +141,17 @@ impl OlmoePackedCheckpoint {
         let hierarchy =
             WeightHierarchy::new(Arc::clone(&self.expert_store), self.runtime.clone(), policy)?;
         OlmoeStreamingModel::load(self.config.clone(), builder, hierarchy)
+    }
+
+    /// Compatibility entry point for callers that require an explicit CPU
+    /// runtime rather than Power's typed device selection.
+    pub fn load_cpu_streaming(&self, policy: ResidencyPolicy) -> Result<OlmoeStreamingModel> {
+        if !self.runtime.device().tensor_device().is_cpu() {
+            return Err(MoeError::InvalidConfig(
+                "packed CPU streaming requires a CPU Power runtime".to_string(),
+            ));
+        }
+        self.load_streaming(policy)
     }
 }
 

@@ -142,7 +142,7 @@ Serve the packed checkpoint through Power's OpenAI-compatible API:
 ```shell
 cargo run --release --features server --bin a3s-moe-server -- \
   /models/OLMoE-1B-7B-0924-a3s \
-  --model olmoe-1b-7b --host-cache-mib 512 \
+  --model olmoe-1b-7b --device cpu --host-cache-mib 512 \
   --max-concurrent-requests 4
 ```
 
@@ -152,6 +152,20 @@ backend and a process-local manifest. Supported sampling controls are
 `repeat_last_n`, `frequency_penalty`, and `presence_penalty`. Unsupported
 modalities, tools, structured output, cross-request KV sessions, and backend
 knobs fail before inference.
+
+The same graph can run on a Power-resolved accelerator. Build exactly one
+platform feature and select a typed device explicitly:
+
+```shell
+cargo run --release --features server,cuda --bin a3s-moe-server -- \
+  /models/OLMoE-1B-7B-0924-a3s --device cuda:0 \
+  --host-cache-mib 512 --device-cache-mib 4096
+```
+
+Metal uses `--features server,metal --device metal:0` on macOS. An explicit
+CUDA or Metal request fails if that backend or ordinal is unavailable. `auto`
+is the only mode allowed to fall back to CPU, and the resolved device plus the
+fallback decision are exposed as content-free service/benchmark evidence.
 
 Produce raw, reproducible performance evidence and optionally compare with the
 fully resident CPU path in an isolated child process:
@@ -169,6 +183,10 @@ only the configured bounded cache. The report explicitly labels the operating
 system page cache as uncontrolled; it does not call that condition physical
 cold I/O. See [Performance Evidence](docs/performance.md) for the measurement
 boundary and comparison rules.
+
+CUDA and Metal are mutually platform-specific Cargo features, so portable CI
+uses `--features server,benchmark,validation` rather than `--all-features`.
+CUDA and macOS runners must compile and test `cuda` and `metal` separately.
 
 Regenerate the tiny oracle only when intentionally changing the pinned model
 contract:

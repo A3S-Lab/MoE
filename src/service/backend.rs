@@ -10,7 +10,7 @@ use a3s_power::backend::types::{
 };
 use a3s_power::backend::Backend;
 use a3s_power::error::{PowerError, Result as PowerResult};
-use a3s_power::inference::{DevicePreference, EmbeddedRuntime, PlacementTelemetry};
+use a3s_power::inference::{EmbeddedRuntime, PlacementTelemetry};
 use a3s_power::model::manifest::{ManifestMessage, ModelFormat, ModelManifest, ModelParameters};
 use a3s_power::server::request_context::RequestContext;
 use async_trait::async_trait;
@@ -22,7 +22,7 @@ use crate::olmoe::{
 };
 use crate::{MoeError, Result};
 
-use super::config::OlmoeBackendConfig;
+use super::config::{OlmoeBackendConfig, OlmoeDeviceSelection};
 use super::request::{prepare_chat, prepare_completion, PromptPolicy};
 use super::stream::CancellableStream;
 use super::worker::GenerationWorker;
@@ -42,6 +42,7 @@ struct LoadedModel {
     tokenizer: Arc<OlmoeTokenizer>,
     model: Arc<OlmoeStreamingModel>,
     worker: GenerationWorker,
+    device: OlmoeDeviceSelection,
 }
 
 impl Drop for LoadedModel {
@@ -58,6 +59,7 @@ struct LoadedArtifacts {
     model: Arc<OlmoeStreamingModel>,
     binding: a3s_power::inference::ExecutionBatchBinding,
     size: u64,
+    device: OlmoeDeviceSelection,
 }
 
 struct LoadSpec {
@@ -112,6 +114,12 @@ impl OlmoeBackend {
             .admission_snapshot())
     }
 
+    /// Returns the requested and resolved execution device without exposing
+    /// model inputs, routes, or weight identities.
+    pub fn device_selection(&self, model_name: &str) -> PowerResult<OlmoeDeviceSelection> {
+        Ok(self.loaded_model(model_name)?.device)
+    }
+
     fn loaded_model(&self, name: &str) -> PowerResult<Arc<LoadedModel>> {
         read_models(&self.models)
             .get(name)
@@ -133,10 +141,17 @@ impl OlmoeBackend {
         }
 
         let limits = self.config.inference_limits.clone();
-        let residency = self.config.residency_policy.clone();
+        let mut residency = self.config.residency_policy.clone();
+        let requested_device = self.config.device;
         let path = spec.path.clone();
         let artifacts = tokio::task::spawn_blocking(move || {
-            let runtime = EmbeddedRuntime::new(DevicePreference::Cpu, limits)?;
+            let runtime = EmbeddedRuntime::new(requested_device, limits)?;
+            let device = OlmoeDeviceSelection::new(
+                requested_device,
+                runtime.device().identity(),
+                residency.device_cache_bytes,
+            );
+            residency.device_cache_bytes = device.effective_device_cache_bytes;
             let checkpoint = OlmoePackedCheckpoint::open(path, runtime)?;
             let tokenizer = Arc::new(checkpoint.load_tokenizer()?);
             let binding = checkpoint.execution_batch_binding()?;
@@ -144,7 +159,7 @@ impl OlmoeBackend {
             let packed_manifest = checkpoint.manifest().clone();
             let size = directory_size(checkpoint.root())?;
             let canonical_path = checkpoint.root().to_path_buf();
-            let model = Arc::new(checkpoint.load_cpu_streaming(residency)?);
+            let model = Arc::new(checkpoint.load_streaming(residency)?);
             Ok::<_, MoeError>(LoadedArtifacts {
                 canonical_path,
                 config,
@@ -153,6 +168,7 @@ impl OlmoeBackend {
                 model,
                 binding,
                 size,
+                device,
             })
         })
         .await
@@ -185,6 +201,7 @@ impl OlmoeBackend {
             tokenizer: artifacts.tokenizer,
             model: artifacts.model,
             worker,
+            device: artifacts.device,
         });
         write_models(&self.models).insert(manifest.name.clone(), loaded);
         Ok(manifest)

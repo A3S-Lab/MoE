@@ -48,6 +48,11 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
   > olmoe-performance.json
 ```
 
+Accelerator runs add `cuda` or `metal`, `--device <kind>:<ordinal>`, and an
+explicit `--device-cache-mib` bound. Evidence records both the typed request
+and Power's resolved device. Only `--device auto` can report
+`automaticCpuFallback: true`; an explicit unavailable accelerator is an error.
+
 The artifact uses schema `a3s.moe.olmoe-performance.v1` and includes:
 
 - logical weight digest and packed byte count;

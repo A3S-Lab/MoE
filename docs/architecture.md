@@ -172,7 +172,12 @@ fine-tune. It does not present the base model as instruction-tuned.
 
 ### M5–M7: Accelerator, TEE, and Second Architecture
 
-- Add device execution with CPU parity and declared fallback evidence.
+- M5 implemented foundation: the same dense and streamed-expert graph executes
+  on Power's resolved CPU, CUDA, or Metal tensor device; expert staging uses
+  the fastest configured tier; explicit accelerators fail closed; and `auto`
+  exposes content-free CPU fallback evidence.
+- M5 pending acceptance: run CUDA and Metal parity against the public oracle
+  on matching hardware and check in dtype-specific evidence.
 - Add seekable encrypted expert reads and TEE memory acceptance.
 - Add a second MoE family without changing Power's model-neutral contracts.
 

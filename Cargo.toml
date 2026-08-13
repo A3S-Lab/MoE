@@ -13,6 +13,8 @@ categories = ["science"]
 [features]
 default = []
 validation = ["dep:sha2"]
+cuda = ["a3s-power/embedded-cuda"]
+metal = ["a3s-power/embedded-metal"]
 server = [
     "a3s-power/server",
     "dep:anyhow",

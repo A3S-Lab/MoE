@@ -147,7 +147,7 @@ impl OlmoeStreamingMlp {
             .map(|expert| {
                 StagedWeightGroupRequest::new(vec![WeightRequest::new(
                     WeightKey::new(self.layer, packed_expert_tensor_name(self.layer, *expert)),
-                    PlacementPreference::Host,
+                    PlacementPreference::Fastest,
                 )])
             })
             .collect();

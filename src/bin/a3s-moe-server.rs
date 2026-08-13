@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use a3s_moe::service::{OlmoeBackend, OlmoeBackendConfig};
+use a3s_moe::service::{OlmoeBackend, OlmoeBackendConfig, OlmoeDeviceSpec};
 use a3s_power::config::PowerConfig;
 use a3s_power::inference::{InferenceLimits, ResidencyPolicy, TelemetryMode};
 use a3s_power::server::PowerServerBuilder;
@@ -39,6 +39,14 @@ struct Args {
     /// Power host-tier expert cache bound in MiB; zero streams every record.
     #[arg(long, default_value_t = 512)]
     host_cache_mib: u64,
+
+    /// Typed execution device: auto, cpu, cuda:<ordinal>, or metal:<ordinal>.
+    #[arg(long, default_value = "cpu")]
+    device: OlmoeDeviceSpec,
+
+    /// Power device-tier expert cache bound in MiB.
+    #[arg(long, default_value_t = 0)]
+    device_cache_mib: u64,
 
     /// Maximum simultaneously active continuous-batch members.
     #[arg(long, default_value_t = 4)]
@@ -101,13 +109,16 @@ async fn main() -> Result<()> {
         ..InferenceLimits::default()
     };
     let host_cache_bytes = mib(args.host_cache_mib)?;
+    let device_cache_bytes = mib(args.device_cache_mib)?;
     let residency = ResidencyPolicy {
         host_cache_bytes,
+        device_cache_bytes,
         max_background_inflight_bytes: 512 * 1024 * 1024,
         telemetry: TelemetryMode::Aggregate,
         ..ResidencyPolicy::default()
     };
     let backend = Arc::new(OlmoeBackend::new(OlmoeBackendConfig {
+        device: args.device.preference(),
         inference_limits: limits,
         residency_policy: residency,
         batch_window: Duration::from_millis(args.batch_window_ms),
@@ -124,10 +135,15 @@ async fn main() -> Result<()> {
     let manifest = backend
         .preload(args.model, args.checkpoint, template_override)
         .await?;
+    let device = backend.device_selection(&manifest.name)?;
     tracing::info!(
         model = %manifest.name,
         weights_sha256 = %manifest.sha256,
         size = manifest.size,
+        requested_device = %args.device,
+        resolved_device = %device.resolved.name(),
+        automatic_cpu_fallback = device.automatic_cpu_fallback,
+        effective_device_cache_bytes = device.effective_device_cache_bytes,
         "verified and loaded packed OLMoE model"
     );
 

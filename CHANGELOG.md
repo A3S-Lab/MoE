@@ -40,3 +40,6 @@ All notable changes to this project are documented in this file.
 - Pinned-Transformers public-checkpoint oracle generation plus an
   integrity-bound `a3s-moe-validate` CLI that reports full logits, router, and
   route parity as versioned JSON evidence.
+- Typed CPU, CUDA, Metal, and automatic device selection for the Power service
+  and benchmark, including device-tier expert staging and explicit automatic
+  CPU fallback evidence.

@@ -6,7 +6,7 @@ use std::time::Duration;
 use a3s_moe::service::{OlmoeBackend, OlmoeBackendConfig};
 use a3s_power::backend::types::{ChatRequest, CompletionRequest};
 use a3s_power::backend::Backend;
-use a3s_power::inference::{InferenceLimits, ResidencyPolicy, TelemetryMode};
+use a3s_power::inference::{DevicePreference, InferenceLimits, ResidencyPolicy, TelemetryMode};
 use futures::StreamExt;
 
 #[path = "support/packed.rs"]
@@ -23,6 +23,7 @@ fn backend_config() -> OlmoeBackendConfig {
         ..InferenceLimits::default()
     };
     OlmoeBackendConfig {
+        device: DevicePreference::Cpu,
         inference_limits: limits,
         residency_policy: ResidencyPolicy {
             host_cache_bytes: 1024 * 1024,
@@ -79,6 +80,11 @@ async fn backend_preloads_and_streams_concurrent_chat_and_completions() {
     assert_eq!(manifest.family.as_deref(), Some("olmoe"));
     assert_eq!(manifest.sha256.len(), 64);
     assert!(backend.supports_manifest(&manifest));
+    let device = backend.device_selection("tiny-olmoe").unwrap();
+    assert_eq!(device.requested, DevicePreference::Cpu);
+    assert_eq!(device.resolved.name(), "cpu");
+    assert!(!device.automatic_cpu_fallback);
+    assert_eq!(device.effective_device_cache_bytes, 0);
     backend.load(&manifest).await.unwrap();
 
     let first = backend
@@ -115,6 +121,45 @@ async fn backend_preloads_and_streams_concurrent_chat_and_completions() {
     assert_eq!(digest.kind, "chat.prompt-token-ids");
     let chat_chunks = successful(backend.chat("tiny-olmoe", chat()).await.unwrap()).await;
     assert!(chat_chunks.last().unwrap().done);
+}
+
+#[cfg(not(any(feature = "cuda", feature = "metal")))]
+#[tokio::test]
+async fn auto_device_records_an_explicit_cpu_fallback_when_no_accelerator_is_available() {
+    let directory = tempfile::tempdir().unwrap();
+    let packed = write_packed(directory.path());
+    let mut config = backend_config();
+    config.device = DevicePreference::Auto;
+    config.residency_policy.device_cache_bytes = 1024 * 1024;
+    let backend = OlmoeBackend::new(config).unwrap();
+    backend.preload("auto", packed, None).await.unwrap();
+
+    let selection = backend.device_selection("auto").unwrap();
+    assert_eq!(selection.requested, DevicePreference::Auto);
+    assert_eq!(selection.resolved.name(), "cpu");
+    assert!(selection.automatic_cpu_fallback);
+    assert_eq!(selection.effective_device_cache_bytes, 0);
+}
+
+#[test]
+fn explicit_cpu_rejects_an_unused_accelerator_cache() {
+    let mut config = backend_config();
+    config.residency_policy.device_cache_bytes = 1;
+    let error = OlmoeBackend::new(config).err().unwrap();
+    assert!(error.to_string().contains("accelerator cache"), "{error}");
+}
+
+#[cfg(not(feature = "cuda"))]
+#[tokio::test]
+async fn explicit_cuda_fails_when_the_backend_was_not_compiled() {
+    let directory = tempfile::tempdir().unwrap();
+    let packed = write_packed(directory.path());
+    let mut config = backend_config();
+    config.device = DevicePreference::Cuda { ordinal: 0 };
+    let backend = OlmoeBackend::new(config).unwrap();
+
+    let error = backend.preload("cuda", packed, None).await.unwrap_err();
+    assert!(error.to_string().contains("embedded-cuda"), "{error}");
 }
 
 #[tokio::test]

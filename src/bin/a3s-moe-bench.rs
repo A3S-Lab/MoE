@@ -3,10 +3,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use a3s_moe::olmoe::{OlmoeCheckpoint, OlmoeConfig, OlmoeCpuModel, OlmoeTokenizer};
-use a3s_moe::service::{OlmoeBackend, OlmoeBackendConfig};
+use a3s_moe::service::{OlmoeBackend, OlmoeBackendConfig, OlmoeDeviceSpec};
 use a3s_power::backend::types::CompletionRequest;
 use a3s_power::backend::Backend;
-use a3s_power::inference::{InferenceLimits, PlacementTelemetry, ResidencyPolicy, TelemetryMode};
+use a3s_power::inference::{
+    DevicePreference, InferenceLimits, PlacementTelemetry, ResidencyPolicy, RuntimeDeviceIdentity,
+    TelemetryMode,
+};
 use anyhow::{Context, Result};
 use candle_core::{Device, IndexOp, Tensor};
 use clap::Parser;
@@ -39,6 +42,13 @@ struct Args {
 
     #[arg(long, default_value_t = 512)]
     host_cache_mib: u64,
+
+    /// Typed execution device: auto, cpu, cuda:<ordinal>, or metal:<ordinal>.
+    #[arg(long, default_value = "cpu")]
+    device: OlmoeDeviceSpec,
+
+    #[arg(long, default_value_t = 0)]
+    device_cache_mib: u64,
 
     /// Internal isolated resident-baseline child mode.
     #[arg(long, hide = true)]
@@ -100,7 +110,11 @@ struct ConfigurationEvidence {
     warm_samples: usize,
     temperature: f32,
     host_cache_bytes: u64,
-    device: &'static str,
+    device_cache_bytes: u64,
+    effective_device_cache_bytes: u64,
+    requested_device: DevicePreference,
+    resolved_device: RuntimeDeviceIdentity,
+    automatic_cpu_fallback: bool,
 }
 
 #[derive(Serialize)]
@@ -196,6 +210,7 @@ async fn main() -> Result<()> {
         OlmoeTokenizer::from_file(checkpoint.join("tokenizer.json"), config.vocab_size)?;
     let prompt_tokens = tokenizer.encode(&args.prompt, true)?;
     let host_cache_bytes = mib(args.host_cache_mib)?;
+    let device_cache_bytes = mib(args.device_cache_mib)?;
     let limits = InferenceLimits {
         max_context_tokens: config.max_position_embeddings,
         max_generated_tokens: args.max_tokens as usize,
@@ -204,9 +219,11 @@ async fn main() -> Result<()> {
         ..InferenceLimits::default()
     };
     let backend = Arc::new(OlmoeBackend::new(OlmoeBackendConfig {
+        device: args.device.preference(),
         inference_limits: limits,
         residency_policy: ResidencyPolicy {
             host_cache_bytes,
+            device_cache_bytes,
             max_background_inflight_bytes: 512 * 1024 * 1024,
             telemetry: TelemetryMode::Aggregate,
             ..ResidencyPolicy::default()
@@ -222,6 +239,7 @@ async fn main() -> Result<()> {
         .await
         .context("failed to preload the packed checkpoint")?;
     let packed_load_ns = duration_ns(load_started.elapsed());
+    let device = backend.device_selection(&args.model)?;
 
     let before_first = backend.telemetry(&args.model)?;
     let first_generation =
@@ -256,7 +274,7 @@ async fn main() -> Result<()> {
             crate_name: env!("CARGO_PKG_NAME"),
             crate_version: env!("CARGO_PKG_VERSION"),
             power_revision: "f1ec432",
-            execution: "cpu-f32-dense-power-streamed-experts",
+            execution: "f32-dense-power-streamed-experts",
         },
         model: ModelEvidence {
             name: manifest.name,
@@ -279,7 +297,11 @@ async fn main() -> Result<()> {
             warm_samples: args.warm_samples,
             temperature: 0.0,
             host_cache_bytes,
-            device: "cpu",
+            device_cache_bytes,
+            effective_device_cache_bytes: device.effective_device_cache_bytes,
+            requested_device: device.requested,
+            resolved_device: device.resolved,
+            automatic_cpu_fallback: device.automatic_cpu_fallback,
         },
         cache_state: CacheStateEvidence {
             power_first_generation: "empty expert residency cache",

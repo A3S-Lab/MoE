@@ -37,6 +37,10 @@ fn benchmark_emits_self_describing_json_evidence() {
     let evidence: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(evidence["schema"], "a3s.moe.olmoe-performance.v1");
     assert_eq!(evidence["configuration"]["promptTokens"], 1);
+    assert_eq!(evidence["configuration"]["requestedDevice"]["kind"], "cpu");
+    assert_eq!(evidence["configuration"]["resolvedDevice"]["kind"], "cpu");
+    assert_eq!(evidence["configuration"]["automaticCpuFallback"], false);
+    assert_eq!(evidence["configuration"]["effectiveDeviceCacheBytes"], 0);
     assert_eq!(evidence["warmSummary"]["samples"], 2);
     assert_eq!(
         evidence["cacheState"]["powerFirstGeneration"],

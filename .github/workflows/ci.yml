@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  portable:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,5 +18,13 @@ jobs:
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --all-targets
+      - run: cargo clippy --features server,benchmark,validation --all-targets -- -D warnings
+      - run: cargo test --features server,benchmark,validation --all-targets
+
+  metal-build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --features server,benchmark,validation,metal --all-targets --no-run
