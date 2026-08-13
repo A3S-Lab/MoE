@@ -9,7 +9,8 @@ use a3s_power::inference::{
 use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
 
-use crate::olmoe::checkpoint::{dense_tensor_names, enforce_metadata_limit, validate_shard_name};
+use crate::checkpoint::{enforce_metadata_limit, validate_shard_name};
+use crate::olmoe::checkpoint::dense_tensor_names;
 use crate::olmoe::{
     packed_expert_tensor_name, OlmoeConfig, OlmoePackedManifest, OlmoeStreamingModel,
     OlmoeTokenizer, PackedExpertRecord,

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
-use crate::olmoe::checkpoint::enforce_metadata_limit;
+use crate::checkpoint::enforce_metadata_limit;
 use crate::olmoe::{OlmoePackedCheckpoint, OlmoePackedManifest};
 use crate::{MoeError, Result};
 

@@ -1,9 +1,12 @@
 mod attention;
+mod checkpoint;
 mod config;
 mod mlp;
 mod model;
 
 pub use crate::DecoderKvCache as Qwen3MoeKvCache;
+pub use crate::{MoeDecodeStream as Qwen3MoeDecodeStream, MoeTokenizer as Qwen3MoeTokenizer};
+pub use checkpoint::Qwen3MoeCheckpoint;
 pub use config::{Qwen3MoeConfig, Qwen3MoeTokenIds};
 pub use model::{Qwen3MoeCpuModel, Qwen3MoeForwardOutput};
 

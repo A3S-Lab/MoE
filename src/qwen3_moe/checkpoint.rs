@@ -9,16 +9,16 @@ use crate::checkpoint::{
 };
 use crate::{MoeError, Result};
 
-use super::{OlmoeConfig, OlmoeCpuModel, OlmoeTokenizer};
+use super::{Qwen3MoeConfig, Qwen3MoeCpuModel, Qwen3MoeTokenizer};
 
-/// Validated Hugging Face OLMoE checkpoint directory.
+/// Validated Hugging Face Qwen3-MoE checkpoint directory.
 #[derive(Debug, Clone)]
-pub struct OlmoeCheckpoint {
-    config: OlmoeConfig,
+pub struct Qwen3MoeCheckpoint {
+    config: Qwen3MoeConfig,
     weights: ShardedSafeTensors,
 }
 
-impl OlmoeCheckpoint {
+impl Qwen3MoeCheckpoint {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().canonicalize()?;
         if !root.is_dir() {
@@ -28,11 +28,9 @@ impl OlmoeCheckpoint {
             )));
         }
         let config_path = root.join(CONFIG_FILE);
-        enforce_metadata_limit(&config_path, MAX_CONFIG_BYTES, "OLMoE config")?;
-        let config = OlmoeConfig::from_json_path(&config_path)?;
-
-        let required_names = required_tensor_names(&config);
-        let weights = ShardedSafeTensors::open(&root, required_names)?;
+        enforce_metadata_limit(&config_path, MAX_CONFIG_BYTES, "Qwen3-MoE config")?;
+        let config = Qwen3MoeConfig::from_json_path(config_path)?;
+        let weights = ShardedSafeTensors::open(&root, required_tensor_names(&config))?;
         Ok(Self { config, weights })
     }
 
@@ -40,7 +38,7 @@ impl OlmoeCheckpoint {
         self.weights.root()
     }
 
-    pub fn config(&self) -> &OlmoeConfig {
+    pub fn config(&self) -> &Qwen3MoeConfig {
         &self.config
     }
 
@@ -48,30 +46,29 @@ impl OlmoeCheckpoint {
         self.weights.shards()
     }
 
-    pub fn load_tokenizer(&self) -> Result<OlmoeTokenizer> {
+    pub fn load_tokenizer(&self) -> Result<Qwen3MoeTokenizer> {
         let path = self.root().join(TOKENIZER_FILE);
-        enforce_metadata_limit(&path, MAX_TOKENIZER_BYTES, "tokenizer")?;
-        OlmoeTokenizer::from_file(path, self.config.vocab_size)
+        enforce_metadata_limit(&path, MAX_TOKENIZER_BYTES, "Qwen3-MoE tokenizer")?;
+        Qwen3MoeTokenizer::from_file(path, self.config.vocab_size)
     }
 
-    /// Load every published tensor into CPU memory and construct the F32
-    /// correctness backend.
-    ///
-    /// This deliberately resident baseline is used for numerical validation.
-    /// Bounded-memory serving uses the Power residency path instead.
-    pub fn load_cpu_resident(&self) -> Result<OlmoeCpuModel> {
+    /// Load the complete checkpoint into the F32 CPU correctness backend.
+    pub fn load_cpu_resident(&self) -> Result<Qwen3MoeCpuModel> {
         let tensors = self.weights.load_cpu()?;
         let builder = VarBuilder::from_tensors(tensors, DType::F32, &Device::Cpu);
-        OlmoeCpuModel::load(self.config.clone(), builder)
+        Qwen3MoeCpuModel::load(self.config.clone(), builder)
     }
 }
 
-pub(super) fn required_tensor_names(config: &OlmoeConfig) -> Vec<String> {
+pub(super) fn required_tensor_names(config: &Qwen3MoeConfig) -> Vec<String> {
     let global_count = if config.tie_word_embeddings { 2 } else { 3 };
     let attention_biases = if config.attention_bias { 4 } else { 0 };
-    let layer_tensor_count = 9 + attention_biases + config.num_experts * 3;
-    let mut names =
-        Vec::with_capacity(global_count + config.num_hidden_layers * layer_tensor_count);
+    let mut names = Vec::with_capacity(
+        global_count
+            + config
+                .num_hidden_layers
+                .saturating_mul(11 + attention_biases),
+    );
     names.push("model.embed_tokens.weight".to_string());
     names.push("model.norm.weight".to_string());
     if !config.tie_word_embeddings {
@@ -93,60 +90,64 @@ pub(super) fn required_tensor_names(config: &OlmoeConfig) -> Vec<String> {
         }
         names.push(format!("{prefix}.self_attn.q_norm.weight"));
         names.push(format!("{prefix}.self_attn.k_norm.weight"));
-        names.push(format!("{prefix}.mlp.gate.weight"));
-        for expert in 0..config.num_experts {
-            let expert_prefix = format!("{prefix}.mlp.experts.{expert}");
-            names.push(format!("{expert_prefix}.gate_proj.weight"));
-            names.push(format!("{expert_prefix}.up_proj.weight"));
-            names.push(format!("{expert_prefix}.down_proj.weight"));
+        if config.is_sparse_layer(layer) {
+            names.push(format!("{prefix}.mlp.gate.weight"));
+            names.push(format!("{prefix}.mlp.experts.gate_up_proj"));
+            names.push(format!("{prefix}.mlp.experts.down_proj"));
+        } else {
+            names.push(format!("{prefix}.mlp.gate_proj.weight"));
+            names.push(format!("{prefix}.mlp.up_proj.weight"));
+            names.push(format!("{prefix}.mlp.down_proj.weight"));
         }
     }
     names
-}
-
-pub(super) fn dense_tensor_names(config: &OlmoeConfig) -> Vec<String> {
-    required_tensor_names(config)
-        .into_iter()
-        .filter(|name| !name.contains(".mlp.experts."))
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
-    use crate::checkpoint::INDEX_FILE;
     use serde_json::json;
+
+    use crate::checkpoint::INDEX_FILE;
+    use crate::qwen3_moe::Qwen3MoeTokenIds;
 
     use super::*;
 
-    fn tiny_config() -> OlmoeConfig {
-        OlmoeConfig {
-            model_type: "olmoe".to_string(),
-            vocab_size: 8,
+    fn tiny_config() -> Qwen3MoeConfig {
+        Qwen3MoeConfig {
+            model_type: "qwen3_moe".to_string(),
+            vocab_size: 16,
             hidden_size: 4,
-            intermediate_size: 3,
-            num_hidden_layers: 1,
+            intermediate_size: 5,
+            moe_intermediate_size: 3,
+            num_hidden_layers: 2,
             num_attention_heads: 2,
             num_key_value_heads: 1,
-            num_experts: 2,
-            num_experts_per_tok: 1,
+            head_dim: Some(4),
+            num_experts: 3,
+            num_experts_per_tok: 2,
             max_position_embeddings: 8,
-            norm_topk_prob: false,
+            norm_topk_prob: true,
             hidden_act: "silu".to_string(),
-            rms_norm_eps: 1e-5,
+            rms_norm_eps: 1e-6,
             rope_theta: 10_000.0,
             attention_bias: false,
-            clip_qkv: None,
+            attention_dropout: 0.0,
+            decoder_sparse_step: 2,
+            mlp_only_layers: Vec::new(),
+            use_sliding_window: false,
+            sliding_window: None,
             tie_word_embeddings: false,
-            eos_token_id: Some(7),
+            bos_token_id: Some(1),
+            eos_token_id: Some(Qwen3MoeTokenIds::One(15)),
             pad_token_id: Some(0),
         }
     }
 
     fn write_checkpoint(
         directory: &Path,
-        config: &OlmoeConfig,
+        config: &Qwen3MoeConfig,
         mutate: impl FnOnce(&mut HashMap<String, String>),
     ) {
         std::fs::write(
@@ -169,15 +170,18 @@ mod tests {
     }
 
     #[test]
-    fn validates_the_complete_tensor_contract_before_loading_bytes() {
+    fn validates_mixed_dense_and_sparse_tensor_inventory() {
         let directory = tempfile::tempdir().unwrap();
         let config = tiny_config();
         write_checkpoint(directory.path(), &config, |_| {});
 
-        let checkpoint = OlmoeCheckpoint::open(directory.path()).unwrap();
+        let checkpoint = Qwen3MoeCheckpoint::open(directory.path()).unwrap();
         assert_eq!(checkpoint.config(), &config);
         assert_eq!(checkpoint.shards().len(), 1);
-        assert_eq!(required_tensor_names(&config).len(), 18);
+        let names = required_tensor_names(&config);
+        assert_eq!(names.len(), 25);
+        assert!(names.contains(&"model.layers.0.mlp.gate_proj.weight".to_string()));
+        assert!(names.contains(&"model.layers.1.mlp.experts.gate_up_proj".to_string()));
     }
 
     #[test]
@@ -185,37 +189,32 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let config = tiny_config();
         write_checkpoint(directory.path(), &config, |weights| {
-            weights.remove("model.layers.0.mlp.gate.weight");
+            weights.remove("model.layers.1.mlp.gate.weight");
         });
-        assert!(OlmoeCheckpoint::open(directory.path()).is_err());
+        assert!(Qwen3MoeCheckpoint::open(directory.path()).is_err());
 
         write_checkpoint(directory.path(), &config, |weights| {
-            *weights.get_mut("model.layers.0.mlp.gate.weight").unwrap() =
+            *weights.get_mut("model.layers.1.mlp.gate.weight").unwrap() =
                 "../outside.safetensors".to_string();
         });
-        assert!(OlmoeCheckpoint::open(directory.path()).is_err());
-
-        write_checkpoint(directory.path(), &config, |weights| {
-            weights.insert(
-                "unexpected.weight".to_string(),
-                "model-00001-of-00001.safetensors".to_string(),
-            );
-        });
-        assert!(OlmoeCheckpoint::open(directory.path()).is_err());
+        assert!(Qwen3MoeCheckpoint::open(directory.path()).is_err());
     }
 
     #[test]
-    fn published_shape_requires_exactly_3219_tensor_names() {
+    fn published_qwen3_30b_a3b_inventory_has_531_tensors() {
         let mut config = tiny_config();
-        config.vocab_size = 50_304;
+        config.vocab_size = 151_936;
         config.hidden_size = 2_048;
-        config.intermediate_size = 1_024;
-        config.num_hidden_layers = 16;
-        config.num_attention_heads = 16;
-        config.num_key_value_heads = 16;
-        config.num_experts = 64;
+        config.intermediate_size = 6_144;
+        config.moe_intermediate_size = 768;
+        config.num_hidden_layers = 48;
+        config.num_attention_heads = 32;
+        config.num_key_value_heads = 4;
+        config.head_dim = Some(128);
+        config.num_experts = 128;
         config.num_experts_per_tok = 8;
-        config.max_position_embeddings = 4_096;
-        assert_eq!(required_tensor_names(&config).len(), 3_219);
+        config.max_position_embeddings = 32_768;
+        config.decoder_sparse_step = 1;
+        assert_eq!(required_tensor_names(&config).len(), 531);
     }
 }
