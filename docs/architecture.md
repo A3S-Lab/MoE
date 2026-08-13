@@ -30,11 +30,14 @@ model implementation. The `a3s-moe` service binary injects its typed backend
 through `PowerServerBuilder`.
 
 Power's generic default model limits intentionally do not assume a 61 GB
-checkpoint or thousands of physical expert files. `a3s-moe` therefore owns a
-bounded family profile: Qwen3-MoE raises only `max_model_bytes` to 64 GiB and
-`max_model_files` to 8,192. Pack, validation, benchmark, and server entrypoints
-select that profile after bounded architecture detection. Library callers keep
-full control of supplied limits; model loading never silently widens them.
+checkpoint, thousands of physical expert files, or the public model's F32 KV
+geometry. `a3s-moe` therefore owns a bounded family profile: Qwen3-MoE raises
+`max_model_bytes` to 64 GiB, `max_model_files` to 8,192, and
+`max_state_bytes` to 24 GiB. The state limit covers four complete 32K caches;
+each cache is exactly 6 GiB for 48 layers, 4 KV heads, and head dimension 128.
+Pack, validation, benchmark, and server entrypoints select that profile after
+bounded architecture detection. Library callers keep full control of supplied
+limits; model loading never silently widens them.
 
 The entrypoints likewise select an architecture-owned residency default.
 Qwen3-MoE permits at most 128 weights and 4 GiB in one exact current-layer

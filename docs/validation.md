@@ -157,6 +157,9 @@ remains an M6 acceptance item on a confidential-computing host.
   possible one-expert files under explicit 64 GiB / 8,192-file hard limits. A
   geometry-only unit test proves the generic Power defaults are too small and
   the selected profile is sufficient without allocating weights.
+- The same geometry test proves that one complete public-model F32 KV cache is
+  6 GiB and that the 24 GiB family state limit covers four concurrent 32K
+  sessions. Power's generic 4 GiB state limit remains unchanged.
 - Its entrypoint residency profile covers a complete 128-expert layer union in
   lossless F32 form under a 4 GiB batch limit while retaining a separate 512
   MiB concurrent-read window. A geometry-only test proves the generic 1 GiB

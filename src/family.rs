@@ -13,6 +13,7 @@ const GIB: u64 = 1024 * 1024 * 1024;
 const QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES: u64 = 61_066_575_648;
 const QWEN3_MOE_MAX_MODEL_FILES: usize = 8_192;
 const QWEN3_MOE_MAX_MODEL_BYTES: u64 = 64 * GIB;
+const QWEN3_MOE_MAX_STATE_BYTES: u64 = 24 * GIB;
 const QWEN3_MOE_MAX_STAGED_WEIGHTS: usize = 128;
 const QWEN3_MOE_MAX_STAGED_BYTES: u64 = 4 * GIB;
 const QWEN3_MOE_MAX_INFLIGHT_BYTES: u64 = 512 * 1024 * 1024;
@@ -94,9 +95,11 @@ impl MoeArchitecture {
             Self::Qwen3Moe => {
                 // The published 30B-A3B checkpoint is about 61 GB and can
                 // produce 6144 expert files under the explicit
-                // one-expert-per-file option.
+                // one-expert-per-file option. Four full 32K F32 KV caches
+                // require 24 GiB with the published attention geometry.
                 limits.max_model_files = QWEN3_MOE_MAX_MODEL_FILES;
                 limits.max_model_bytes = QWEN3_MOE_MAX_MODEL_BYTES;
+                limits.max_state_bytes = QWEN3_MOE_MAX_STATE_BYTES;
             }
         }
         limits
@@ -163,12 +166,26 @@ mod tests {
 
     #[test]
     fn public_model_profiles_cover_real_checkpoint_geometry_without_allocation() {
+        const LAYERS: u64 = 48;
+        const KV_HEADS: u64 = 4;
+        const HEAD_DIM: u64 = 128;
+        const MAX_CONTEXT_TOKENS: u64 = 32_768;
+        const SERVICE_CONCURRENCY: u64 = 4;
+        const KEY_AND_VALUE: u64 = 2;
+        const F32_BYTES: u64 = 4;
+        const FULL_SESSION_KV_BYTES: u64 =
+            KEY_AND_VALUE * LAYERS * KV_HEADS * HEAD_DIM * MAX_CONTEXT_TOKENS * F32_BYTES;
+        const FULL_SERVICE_KV_BYTES: u64 = FULL_SESSION_KV_BYTES * SERVICE_CONCURRENCY;
+
         let power_default = InferenceLimits::default();
         let qwen = MoeArchitecture::Qwen3Moe.inference_limits();
         assert!(power_default.max_model_bytes < QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES);
         assert!(power_default.max_model_files < 48 * 128);
+        assert!(power_default.max_state_bytes < FULL_SESSION_KV_BYTES);
         assert!(qwen.max_model_bytes >= QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES);
         assert!(qwen.max_model_files >= 48 * 128);
+        assert_eq!(FULL_SESSION_KV_BYTES, 6 * GIB);
+        assert!(qwen.max_state_bytes >= FULL_SERVICE_KV_BYTES);
         assert_eq!(MoeArchitecture::Olmoe.inference_limits(), power_default);
         qwen.validate().unwrap();
     }
