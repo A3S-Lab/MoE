@@ -28,11 +28,12 @@
 
 `tools/generate_public_oracle.py` imports Transformers only from a Git checkout
 whose `HEAD` and OLMoE source SHA-256 match the pinned values. It loads the
-pinned checkpoint as F32 on
-CPU with eager attention and captures all prompt logits, all per-layer router
-logits, and the exact top-k expert IDs and full-softmax weights. Its file
-inventory binds the config, index, tokenizer, and every SafeTensor shard by
-byte length and SHA-256.
+pinned checkpoint as F32 on CPU with eager attention and captures all prompt
+logits, all per-layer router logits, and the exact top-k expert IDs and
+full-softmax weights. Before model construction it requires the exact config,
+index, tokenizer, tokenizer configuration, and three SafeTensor shard lengths
+and SHA-256 values from the pinned checkpoint revision. The emitted inventory
+repeats those trust anchors for the Rust validator.
 
 `a3s-moe-validate` re-hashes that inventory before loading the resident Rust
 model. It then checks tokenizer IDs, every numerical value, every token argmax,

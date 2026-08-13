@@ -46,3 +46,5 @@ All notable changes to this project are documented in this file.
 - Pinned-manifest, seekable AES-256-GCM packed checkpoints with bounded
   decrypted chunks, zeroizing typed keys, an environment-key encryption CLI,
   and encrypted Power service loading without plaintext weight intermediates.
+- Exact official file-size and SHA-256 verification in the public OLMoE oracle
+  generator before any model weights are loaded.

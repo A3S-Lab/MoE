@@ -28,6 +28,39 @@ TRANSFORMERS_SOURCE_SHA256 = (
 )
 DEFAULT_PROMPT = "Bitcoin is"
 READ_CHUNK_BYTES = 8 * 1024 * 1024
+PINNED_CHECKPOINT_FILES = {
+    "config.json": (
+        759,
+        "3643aa880d2f1c9b418156269ae791c73e5612d6b6b6fde0724d927cf89b6335",
+    ),
+    "model.safetensors.index.json": (
+        287_214,
+        "0e2e1e0d8d357ac7af817cff28410c3dbad398f060c517a433e4076b2aae5579",
+    ),
+    "model-00001-of-00003.safetensors": (
+        4_997_744_872,
+        "5e3cff7e367794685c241169072c940d200918617d5e2813f1c387dff52d845e",
+    ),
+    "model-00002-of-00003.safetensors": (
+        4_997_235_176,
+        "15ef5c730ee3cfed7199498788cd2faf337203fc74b529625e7502cdd759f4a7",
+    ),
+    "model-00003-of-00003.safetensors": (
+        3_843_741_912,
+        "a9abac4ac1b55c9adabac721a02fa39971f103eea9a65c310972b1246de76e04",
+    ),
+    "tokenizer.json": (
+        2_115_417,
+        "a094266ac6c4982efba277bc251349a5a6d6ad37efb39a2a90f53d8be2a40a40",
+    ),
+    "tokenizer_config.json": (
+        5_372,
+        "78a839c7851f14f9fb30e664c2b46166dc0628f2900679e5ec160656f702edff",
+    ),
+}
+PINNED_WEIGHT_SHARDS = {
+    name for name in PINNED_CHECKPOINT_FILES if name.endswith(".safetensors")
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,22 +129,32 @@ def checkpoint_inventory(root: Path) -> list[dict[str, Any]]:
     weight_map = index.get("weight_map")
     if not isinstance(weight_map, dict) or not weight_map:
         raise RuntimeError("model.safetensors.index.json has no weight_map")
-    names = {
-        "config.json",
-        "model.safetensors.index.json",
-        "tokenizer.json",
-        *weight_map.values(),
-    }
-    tokenizer_config = root / "tokenizer_config.json"
-    if tokenizer_config.exists():
-        names.add("tokenizer_config.json")
+    if any(not isinstance(name, str) for name in weight_map.values()):
+        raise RuntimeError("checkpoint index contains a non-string shard name")
+    declared_shards = set(weight_map.values())
+    if declared_shards != PINNED_WEIGHT_SHARDS:
+        raise RuntimeError(
+            "checkpoint index shard inventory does not match the pinned revision"
+        )
     inventory = []
-    for name in sorted(names):
-        if not isinstance(name, str):
-            raise RuntimeError("checkpoint inventory contains a non-string filename")
+    for name, (expected_bytes, expected_sha256) in sorted(
+        PINNED_CHECKPOINT_FILES.items()
+    ):
         path = regular_file(root, name)
+        actual_bytes = path.stat().st_size
+        if actual_bytes != expected_bytes:
+            raise RuntimeError(
+                f"checkpoint file {name!r} has {actual_bytes} bytes, "
+                f"expected {expected_bytes} for revision {MODEL_REVISION}"
+            )
+        actual_sha256 = sha256_file(path)
+        if actual_sha256 != expected_sha256:
+            raise RuntimeError(
+                f"checkpoint file {name!r} has SHA-256 {actual_sha256}, "
+                f"expected {expected_sha256} for revision {MODEL_REVISION}"
+            )
         inventory.append(
-            {"name": name, "bytes": path.stat().st_size, "sha256": sha256_file(path)}
+            {"name": name, "bytes": expected_bytes, "sha256": expected_sha256}
         )
     return inventory
 
@@ -136,6 +179,7 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
     checkpoint = args.checkpoint.resolve(strict=True)
     if not checkpoint.is_dir():
         raise ValueError(f"checkpoint is not a directory: {checkpoint}")
+    inventory = checkpoint_inventory(checkpoint)
 
     import torch
     import transformers
@@ -189,7 +233,7 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
             "revision": MODEL_REVISION,
             "transformersRevision": transformers_revision,
             "transformersSourceSha256": source_sha256,
-            "files": checkpoint_inventory(checkpoint),
+            "files": inventory,
         },
         "input": {
             "text": args.prompt,
