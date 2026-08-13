@@ -1,5 +1,6 @@
 use a3s_moe::qwen3_moe::{
-    Qwen3MoeConversionOptions, Qwen3MoePackedCheckpoint, Qwen3MoePackedManifest,
+    Qwen3MoeConversionOptions, Qwen3MoeExpertLayout, Qwen3MoePackedCheckpoint,
+    Qwen3MoePackedManifest,
 };
 use a3s_power::inference::{
     DevicePreference, EmbeddedRuntime, InferenceLimits, ResidencyPolicy, TelemetryMode, WeightStore,
@@ -10,7 +11,48 @@ use std::process::Command;
 use tokio_util::sync::CancellationToken;
 
 mod support;
-use support::qwen::{tiny_config, write_source};
+use support::qwen::{tiny_config, write_source, write_split_source};
+
+#[tokio::test]
+async fn official_split_expert_layout_converts_to_the_same_streaming_equations() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = write_split_source(&directory.path().join("source"), DType::F32);
+    assert_eq!(source.expert_layout(), Qwen3MoeExpertLayout::Split);
+    let resident = source.load_cpu_resident().unwrap();
+    let packed_path = directory.path().join("packed");
+    let limits = InferenceLimits::default();
+    let report = source
+        .convert_to_packed(
+            &packed_path,
+            &limits,
+            Qwen3MoeConversionOptions {
+                experts_per_file: 2,
+                max_buffer_bytes: 2048,
+            },
+        )
+        .unwrap();
+    assert_eq!(report.packed_experts, 3);
+
+    let runtime = EmbeddedRuntime::new(DevicePreference::Cpu, limits).unwrap();
+    let streaming = Qwen3MoePackedCheckpoint::open(&packed_path, runtime.clone())
+        .unwrap()
+        .load_cpu_streaming(ResidencyPolicy {
+            host_cache_bytes: 1024,
+            max_background_inflight_bytes: 2048,
+            ..ResidencyPolicy::default()
+        })
+        .unwrap();
+    let input = Tensor::from_vec(vec![1_u32, 4, 2], (1, 3), &Device::Cpu).unwrap();
+    let expected = resident.forward(&input, &mut resident.new_cache()).unwrap();
+    let cancellation = CancellationToken::new();
+    let permit = runtime.begin(&cancellation).unwrap();
+    let actual = streaming
+        .forward(&input, &mut streaming.new_cache(), &permit, &cancellation)
+        .await
+        .unwrap();
+    assert_tensor_close(&actual.logits, &expected.logits);
+    assert_eq!(actual.layer_routes, expected.layer_routes);
+}
 
 #[tokio::test]
 async fn bounded_fused_conversion_matches_the_resident_mixed_decoder() {

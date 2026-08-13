@@ -12,7 +12,8 @@ The report separates these phases:
    of Power's expert hierarchy.
 2. First generation with an empty Power expert residency cache.
 3. Repeated warm generations with the bounded Power cache retained.
-4. Optional fully resident CPU loading and generation in a separate process.
+4. Optional OLMoE fully resident CPU loading and generation in a separate
+   process.
 
 Time to first token is measured at the caller-facing backend stream. The
 per-request model prompt duration is also retained when supplied by the worker.
@@ -54,15 +55,33 @@ explicit `--device-cache-mib` bound. Evidence records both the typed request
 and Power's resolved device. Only `--device auto` can report
 `automaticCpuFallback: true`; an explicit unavailable accelerator is an error.
 
-The artifact uses schema `a3s.moe.olmoe-performance.v1` and includes:
+The Qwen3-MoE public run uses the same measurement boundary without a resident
+F32 child. Its parity gate is the separately generated, pinned Transformers
+BF16 oracle:
+
+```shell
+cargo run --release --features benchmark --bin a3s-moe-bench -- \
+  /models/Qwen3-30B-A3B-Base-a3s \
+  --prompt "Bitcoin is" \
+  --max-tokens 8 \
+  --warm-samples 3 \
+  --host-cache-mib 4096 \
+  --checkpoint-label qwen3-30b-a3b-bf16 \
+  > qwen3-moe-performance.json
+```
+
+Artifacts use `a3s.moe.olmoe-performance.v1` or
+`a3s.moe.qwen3-moe-performance.v1` and include:
 
 - logical weight digest and packed byte count;
 - OS, architecture, logical parallelism, and available processor identity;
 - prompt and generation settings;
 - raw first and warm timing samples;
 - Power expert I/O, hit, eviction, and residency counters;
-- streaming and isolated resident peak RSS;
-- exact generated token IDs and resident-versus-streaming parity.
+- streaming process peak RSS;
+- exact generated token IDs;
+- for OLMoE when requested, isolated resident peak RSS and
+  resident-versus-streaming token parity.
 
 Compare artifacts only when model digest, prompt token IDs, generation policy,
 hardware, build profile, cache policy, and page-cache preparation are
@@ -81,3 +100,7 @@ Peak RSS was 13,612,077,056 bytes for streaming versus 41,563,848,704 bytes for
 the resident baseline (about 3.05 times lower), while the resident path was
 about 6.94 times faster for this CPU-only sample. The OS page cache was
 uncontrolled, so the artifact makes no physical-cold-storage claim.
+
+The pinned Qwen3-30B-A3B-Base performance report remains pending. No public
+throughput or memory claim is made until the complete-checkpoint numerical gate
+passes and the raw family-specific artifact is checked under `evidence/`.

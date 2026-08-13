@@ -12,7 +12,7 @@ categories = ["science"]
 
 [features]
 default = []
-validation = []
+validation = ["dep:tokio"]
 cuda = ["a3s-power/embedded-cuda"]
 metal = ["a3s-power/embedded-metal"]
 server = [

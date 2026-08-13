@@ -16,6 +16,16 @@ use super::{Qwen3MoeConfig, Qwen3MoeCpuModel, Qwen3MoeTokenizer};
 pub struct Qwen3MoeCheckpoint {
     config: Qwen3MoeConfig,
     weights: ShardedSafeTensors,
+    expert_layout: Qwen3MoeExpertLayout,
+}
+
+/// Expert tensor layout used by a Qwen3-MoE source checkpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Qwen3MoeExpertLayout {
+    /// Official Hugging Face layout with three matrices per expert.
+    Split,
+    /// Fused three-dimensional gate/up and down arrays used by some exporters.
+    Fused,
 }
 
 impl Qwen3MoeCheckpoint {
@@ -30,8 +40,27 @@ impl Qwen3MoeCheckpoint {
         let config_path = root.join(CONFIG_FILE);
         enforce_metadata_limit(&config_path, MAX_CONFIG_BYTES, "Qwen3-MoE config")?;
         let config = Qwen3MoeConfig::from_json_path(config_path)?;
-        let weights = ShardedSafeTensors::open(&root, required_tensor_names(&config))?;
-        Ok(Self { config, weights })
+        let (weights, inventory) = ShardedSafeTensors::open_one_of(
+            &root,
+            vec![
+                required_tensor_names(&config, Qwen3MoeExpertLayout::Split),
+                required_tensor_names(&config, Qwen3MoeExpertLayout::Fused),
+            ],
+        )?;
+        let expert_layout = match inventory {
+            0 => Qwen3MoeExpertLayout::Split,
+            1 => Qwen3MoeExpertLayout::Fused,
+            _ => {
+                return Err(MoeError::InvalidConfig(
+                    "Qwen3-MoE tensor layout selection is invalid".to_string(),
+                ))
+            }
+        };
+        Ok(Self {
+            config,
+            weights,
+            expert_layout,
+        })
     }
 
     pub fn root(&self) -> &Path {
@@ -44,6 +73,10 @@ impl Qwen3MoeCheckpoint {
 
     pub fn shards(&self) -> &[PathBuf] {
         self.weights.shards()
+    }
+
+    pub fn expert_layout(&self) -> Qwen3MoeExpertLayout {
+        self.expert_layout
     }
 
     pub fn load_tokenizer(&self) -> Result<Qwen3MoeTokenizer> {
@@ -60,7 +93,34 @@ impl Qwen3MoeCheckpoint {
     }
 }
 
-pub(super) fn required_tensor_names(config: &Qwen3MoeConfig) -> Vec<String> {
+fn required_tensor_names(
+    config: &Qwen3MoeConfig,
+    expert_layout: Qwen3MoeExpertLayout,
+) -> Vec<String> {
+    let mut names = dense_tensor_names(config);
+    for layer in 0..config.num_hidden_layers {
+        if !config.is_sparse_layer(layer) {
+            continue;
+        }
+        let prefix = format!("model.layers.{layer}.mlp.experts");
+        match expert_layout {
+            Qwen3MoeExpertLayout::Split => {
+                for expert in 0..config.num_experts {
+                    names.push(format!("{prefix}.{expert}.gate_proj.weight"));
+                    names.push(format!("{prefix}.{expert}.up_proj.weight"));
+                    names.push(format!("{prefix}.{expert}.down_proj.weight"));
+                }
+            }
+            Qwen3MoeExpertLayout::Fused => {
+                names.push(format!("{prefix}.gate_up_proj"));
+                names.push(format!("{prefix}.down_proj"));
+            }
+        }
+    }
+    names
+}
+
+pub(super) fn dense_tensor_names(config: &Qwen3MoeConfig) -> Vec<String> {
     let global_count = if config.tie_word_embeddings { 2 } else { 3 };
     let attention_biases = if config.attention_bias { 4 } else { 0 };
     let mut names = Vec::with_capacity(
@@ -92,8 +152,6 @@ pub(super) fn required_tensor_names(config: &Qwen3MoeConfig) -> Vec<String> {
         names.push(format!("{prefix}.self_attn.k_norm.weight"));
         if config.is_sparse_layer(layer) {
             names.push(format!("{prefix}.mlp.gate.weight"));
-            names.push(format!("{prefix}.mlp.experts.gate_up_proj"));
-            names.push(format!("{prefix}.mlp.experts.down_proj"));
         } else {
             names.push(format!("{prefix}.mlp.gate_proj.weight"));
             names.push(format!("{prefix}.mlp.up_proj.weight"));
@@ -101,13 +159,6 @@ pub(super) fn required_tensor_names(config: &Qwen3MoeConfig) -> Vec<String> {
         }
     }
     names
-}
-
-pub(super) fn dense_tensor_names(config: &Qwen3MoeConfig) -> Vec<String> {
-    required_tensor_names(config)
-        .into_iter()
-        .filter(|name| !name.contains(".mlp.experts."))
-        .collect()
 }
 
 #[cfg(test)]
@@ -164,7 +215,7 @@ mod tests {
         .unwrap();
         let shard = "model-00001-of-00001.safetensors";
         std::fs::write(directory.join(shard), []).unwrap();
-        let mut weight_map = required_tensor_names(config)
+        let mut weight_map = required_tensor_names(config, Qwen3MoeExpertLayout::Fused)
             .into_iter()
             .map(|name| (name, shard.to_string()))
             .collect::<HashMap<_, _>>();
@@ -185,7 +236,8 @@ mod tests {
         let checkpoint = Qwen3MoeCheckpoint::open(directory.path()).unwrap();
         assert_eq!(checkpoint.config(), &config);
         assert_eq!(checkpoint.shards().len(), 1);
-        let names = required_tensor_names(&config);
+        assert_eq!(checkpoint.expert_layout(), Qwen3MoeExpertLayout::Fused);
+        let names = required_tensor_names(&config, Qwen3MoeExpertLayout::Fused);
         assert_eq!(names.len(), 25);
         assert!(names.contains(&"model.layers.0.mlp.gate_proj.weight".to_string()));
         assert!(names.contains(&"model.layers.1.mlp.experts.gate_up_proj".to_string()));
@@ -208,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn published_qwen3_30b_a3b_inventory_has_531_tensors() {
+    fn published_qwen3_30b_a3b_inventories_have_the_expected_tensor_counts() {
         let mut config = tiny_config();
         config.vocab_size = 151_936;
         config.hidden_size = 2_048;
@@ -222,6 +274,13 @@ mod tests {
         config.num_experts_per_tok = 8;
         config.max_position_embeddings = 32_768;
         config.decoder_sparse_step = 1;
-        assert_eq!(required_tensor_names(&config).len(), 531);
+        assert_eq!(
+            required_tensor_names(&config, Qwen3MoeExpertLayout::Fused).len(),
+            531
+        );
+        assert_eq!(
+            required_tensor_names(&config, Qwen3MoeExpertLayout::Split).len(),
+            18_867
+        );
     }
 }

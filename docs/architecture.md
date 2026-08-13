@@ -66,12 +66,14 @@ a bounded number of atomic records from one layer. Power opens only
 `experts/` for residency, preventing resident dense weights from being counted
 or duplicated in the expert cache. The converter publishes the destination
 only after both collections have been reopened and their digests recorded.
-Qwen3-MoE source checkpoints fuse every layer's experts into two large 3-D
-tensors. Conversion uses Power's integrity-verified tensor-subrange API to read
-one expert slice at a time, and uses the same bounded range API to stream dense
-tensors larger than the conversion budget into valid one-tensor SafeTensor
-files. The declared buffer limit therefore applies without relying on the
-source tensor being smaller than that limit.
+The official Qwen3-MoE checkpoint stores three matrices under each numbered
+expert. The loader also accepts an exact fused-exporter inventory with one 3-D
+gate/up tensor and one 3-D down tensor per sparse layer. Conversion reads the
+official matrices one expert at a time; for fused exporters it uses Power's
+integrity-verified tensor-subrange API to read one expert slice at a time. The
+same bounded range API streams dense tensors larger than the conversion budget
+into valid one-tensor SafeTensor files. The declared buffer limit therefore
+applies without relying on a complete source tensor being smaller than it.
 
 Only `WeightHierarchy` owns resident bytes. Model code may hold short-lived
 views for the current operation but cannot retain a parallel byte cache.
@@ -196,7 +198,8 @@ milestones reuse the same oracle for batched, streaming, and accelerator paths.
   fail-closed unsupported request controls.
 - Implemented: a JSON evidence harness measures application-cold and warm
   throughput, TTFT, expert storage bytes, cache telemetry, and process peak RSS.
-  The resident CPU baseline runs in a separate child process.
+  The optional OLMoE resident CPU baseline runs in a separate child process;
+  Qwen3-MoE uses its independent pinned BF16 oracle as the parity gate.
 - Accepted on the checked CPU host: complete-checkpoint conversion, Power
   streaming, real HTTP completion/SSE, eight-token resident parity, and raw
   first/warm performance evidence are checked under `evidence/`. The artifact
@@ -226,26 +229,31 @@ fine-tune. It does not present the base model as instruction-tuned.
 - M7 implemented inference path: Qwen3-MoE validates its independent head
   dimension, sparse/dense layer schedule, MoE-specific intermediate width, and
   normalized top-k policy. Its resident F32 CPU decoder implements per-head
-  Q/K normalization, GQA, RoPE, optional sliding attention, fused 3-D expert
-  tensors, canonical reduction, transactional shared KV cache, and greedy
-  generation. A dependency-free full-decoder fixture validates logits, router
-  logits, and unchanged Power `RoutedExpertBatch` routes across dense and
-  sparse layers. The second family also reuses a single hardened SafeTensor
-  shard-index loader and vocabulary-bounded tokenizer while supplying its own
-  exact mixed dense/sparse tensor inventory.
-- M7 implemented streaming path: fused 3-D expert arrays are converted through
-  verified bounded subranges into the shared lossless expert record; oversized
-  dense tensors copy in bounded chunks; exact packed inventories and digests
-  fail closed; and mixed dense/sparse execution shares the resident decoder
-  state while every sparse layer uses one Power hierarchy. Tiny F32 forward,
-  BF16 generation, exact-route, cache-bound, and CLI auto-detection tests pass.
+  Q/K normalization, GQA, RoPE, optional sliding attention, official split or
+  fused-exporter expert tensors, canonical reduction, transactional shared KV
+  cache, and greedy generation. A dependency-free full-decoder fixture
+  validates logits, router logits, and unchanged Power `RoutedExpertBatch`
+  routes across dense and sparse layers. The second family also reuses a single
+  hardened SafeTensor shard-index loader and vocabulary-bounded tokenizer while
+  supplying exact 18,867-tensor official and 531-tensor fused inventories.
+- M7 implemented streaming path: official per-expert matrices are read under
+  the conversion bound, while fused 3-D arrays use verified bounded subranges;
+  both become the shared lossless expert record. Oversized dense tensors copy
+  in bounded chunks; exact packed inventories and digests fail closed; and
+  mixed dense/sparse execution shares the resident decoder state while every
+  sparse layer uses one Power hierarchy. Tiny split/fused F32 forward, BF16
+  generation, exact-route, cache-bound, and CLI auto-detection tests pass.
 - M7 implemented service path: the shared continuous scheduler preserves
   architecture-specific route unions, and a typed Qwen3-MoE backend passes
   concurrent completion/chat generation plus real Power HTTP completion and
   SSE tests. The server automatically selects the model family from
   `config.json`.
-- M7 pending acceptance: pin and run the public Qwen3-MoE checkpoint numerical
-  and performance gates.
+- M7 implemented acceptance tooling: an exact public checkpoint inventory,
+  pinned Transformers BF16 oracle generator, architecture-aware numerical
+  validator, and family-specific performance evidence schema are regression
+  tested.
+- M7 pending acceptance: run the pinned public Qwen3-MoE numerical and
+  performance gates and commit their raw reports.
 
 ## Acceptance Gates
 

@@ -18,6 +18,8 @@ pub mod qwen3_moe;
 pub mod service;
 mod sparse;
 mod tokenizer;
+#[cfg(feature = "validation")]
+mod validation;
 
 pub use decoder::DecoderKvCache;
 pub use error::{MoeError, Result};

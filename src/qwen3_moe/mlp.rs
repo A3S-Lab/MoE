@@ -71,44 +71,16 @@ impl SparseMlp {
         let moe = config.moe_config()?;
         let router =
             candle_nn::linear_no_bias(config.hidden_size, config.num_experts, builder.pp("gate"))?;
-        let gate_up_width = config.moe_intermediate_size.checked_mul(2).ok_or_else(|| {
-            MoeError::InvalidConfig("expert gate/up width overflowed".to_string())
-        })?;
-        let gate_up = builder.pp("experts").get(
-            (config.num_experts, gate_up_width, config.hidden_size),
-            "gate_up_proj",
-        )?;
-        let down = builder.pp("experts").get(
-            (
-                config.num_experts,
-                config.hidden_size,
-                config.moe_intermediate_size,
-            ),
-            "down_proj",
-        )?;
-        let mut experts = Vec::with_capacity(config.num_experts);
-        for expert in 0..config.num_experts {
-            let gate_up = gate_up.narrow(0, expert, 1)?.squeeze(0)?;
-            experts.push(SparseExpert {
-                gate: Linear::new(
-                    gate_up
-                        .narrow(0, 0, config.moe_intermediate_size)?
-                        .contiguous()?,
-                    None,
-                ),
-                up: Linear::new(
-                    gate_up
-                        .narrow(
-                            0,
-                            config.moe_intermediate_size,
-                            config.moe_intermediate_size,
-                        )?
-                        .contiguous()?,
-                    None,
-                ),
-                down: Linear::new(down.narrow(0, expert, 1)?.squeeze(0)?.contiguous()?, None),
-            });
-        }
+        let expert_builder = builder.pp("experts");
+        let experts = if expert_builder.contains_tensor("gate_up_proj") {
+            load_fused_experts(config, expert_builder)?
+        } else if expert_builder.contains_tensor("0.gate_proj.weight") {
+            load_split_experts(config, expert_builder)?
+        } else {
+            return Err(MoeError::InvalidTensor(
+                "Qwen3-MoE expert tensors use neither the split nor fused layout".to_string(),
+            ));
+        };
         Ok(Self {
             router,
             experts,
@@ -185,6 +157,80 @@ impl SparseMlp {
             routes,
         })
     }
+}
+
+fn load_fused_experts(
+    config: &Qwen3MoeConfig,
+    builder: VarBuilder<'_>,
+) -> Result<Vec<SparseExpert>> {
+    let gate_up_width = config
+        .moe_intermediate_size
+        .checked_mul(2)
+        .ok_or_else(|| MoeError::InvalidConfig("expert gate/up width overflowed".to_string()))?;
+    let gate_up = builder.get(
+        (config.num_experts, gate_up_width, config.hidden_size),
+        "gate_up_proj",
+    )?;
+    let down = builder.get(
+        (
+            config.num_experts,
+            config.hidden_size,
+            config.moe_intermediate_size,
+        ),
+        "down_proj",
+    )?;
+    let mut experts = Vec::with_capacity(config.num_experts);
+    for expert in 0..config.num_experts {
+        let gate_up = gate_up.narrow(0, expert, 1)?.squeeze(0)?;
+        experts.push(SparseExpert {
+            gate: Linear::new(
+                gate_up
+                    .narrow(0, 0, config.moe_intermediate_size)?
+                    .contiguous()?,
+                None,
+            ),
+            up: Linear::new(
+                gate_up
+                    .narrow(
+                        0,
+                        config.moe_intermediate_size,
+                        config.moe_intermediate_size,
+                    )?
+                    .contiguous()?,
+                None,
+            ),
+            down: Linear::new(down.narrow(0, expert, 1)?.squeeze(0)?.contiguous()?, None),
+        });
+    }
+    Ok(experts)
+}
+
+fn load_split_experts(
+    config: &Qwen3MoeConfig,
+    builder: VarBuilder<'_>,
+) -> Result<Vec<SparseExpert>> {
+    let mut experts = Vec::with_capacity(config.num_experts);
+    for expert in 0..config.num_experts {
+        let builder = builder.pp(expert);
+        experts.push(SparseExpert {
+            gate: candle_nn::linear_no_bias(
+                config.hidden_size,
+                config.moe_intermediate_size,
+                builder.pp("gate_proj"),
+            )?,
+            up: candle_nn::linear_no_bias(
+                config.hidden_size,
+                config.moe_intermediate_size,
+                builder.pp("up_proj"),
+            )?,
+            down: candle_nn::linear_no_bias(
+                config.moe_intermediate_size,
+                config.hidden_size,
+                builder.pp("down_proj"),
+            )?,
+        });
+    }
+    Ok(experts)
 }
 
 pub(super) struct Qwen3MoeSparseMlpOutput {

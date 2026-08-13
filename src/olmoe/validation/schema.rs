@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{MoeError, Result};
+pub use crate::validation::{
+    NumericComparison as OlmoeNumericComparison, OracleFile as OlmoeOracleFile,
+    OracleInput as OlmoeOracleInput, OracleRoute as OlmoeOracleRoute,
+    ValidationStatus as OlmoeValidationStatus,
+};
 
 pub const OLMOE_PUBLIC_ORACLE_SCHEMA: &str = "a3s.moe.olmoe-public-oracle.v1";
 pub const OLMOE_PUBLIC_MODEL_ID: &str = "allenai/OLMoE-1B-7B-0924";
@@ -8,15 +12,6 @@ pub const OLMOE_PUBLIC_MODEL_REVISION: &str = "6d84c48581ece794365f2b8e9cfb043c6
 pub const OLMOE_TRANSFORMERS_REVISION: &str = "918dbf131d0df5b46e3f6e1d96174d62aa4d16d6";
 pub const OLMOE_TRANSFORMERS_SOURCE_SHA256: &str =
     "53a94a479f9904674a5f45aba0387c13466a1f2a2d3cdb9226f9cf58946ebbf8";
-
-/// One integrity-bound file used to construct the independent oracle.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OlmoeOracleFile {
-    pub name: String,
-    pub bytes: u64,
-    pub sha256: String,
-}
 
 /// Provenance for the exact model and independent Transformers equations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,23 +22,6 @@ pub struct OlmoeOracleModel {
     pub transformers_revision: String,
     pub transformers_source_sha256: String,
     pub files: Vec<OlmoeOracleFile>,
-}
-
-/// Tokenizer input captured by the independent oracle.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OlmoeOracleInput {
-    pub text: String,
-    pub add_special_tokens: bool,
-    pub token_ids: Vec<u32>,
-}
-
-/// One selected expert and its full-softmax routing probability.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OlmoeOracleRoute {
-    pub expert: u32,
-    pub weight: f32,
 }
 
 /// Complete prompt logits, router logits, and selected routes.
@@ -82,51 +60,6 @@ impl Default for OlmoeValidationTolerances {
             route_weights_abs: 2e-4,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OlmoeNumericComparison {
-    pub tolerance: f32,
-    pub max_abs_diff: f32,
-    pub mismatch_count: u64,
-}
-
-impl OlmoeNumericComparison {
-    pub(super) fn new(tolerance: f32) -> Self {
-        Self {
-            tolerance,
-            max_abs_diff: 0.0,
-            mismatch_count: 0,
-        }
-    }
-
-    pub(super) fn observe(&mut self, actual: f32, expected: f32) -> Result<()> {
-        if !actual.is_finite() || !expected.is_finite() {
-            return Err(MoeError::InvalidTensor(
-                "oracle comparison encountered a non-finite value".to_string(),
-            ));
-        }
-        let difference = (actual - expected).abs();
-        let difference = if difference.is_finite() {
-            difference
-        } else {
-            f32::MAX
-        };
-        self.max_abs_diff = self.max_abs_diff.max(difference);
-        if difference > self.tolerance {
-            self.mismatch_count = self.mismatch_count.saturating_add(1);
-        }
-        Ok(())
-    }
-}
-
-/// Machine-readable result from one full public-checkpoint validation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum OlmoeValidationStatus {
-    Passed,
-    Failed,
 }
 
 /// Evidence emitted after comparing every captured numerical value.

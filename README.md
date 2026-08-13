@@ -8,10 +8,10 @@ routing equations, kernels, KV-cache semantics, tokenization, and generation.
 
 The supported architectures are
 [OLMoE-1B-7B](https://huggingface.co/allenai/OLMoE-1B-7B-0924) and
-Qwen3-MoE. OLMoE has 64 experts per layer with 8 selected per token, 7B total
-parameters, and approximately 1B active parameters. Qwen3-MoE supplies a
-second, mixed dense/sparse architecture boundary without changing Power's
-model-neutral residency core.
+[Qwen3-30B-A3B-Base](https://huggingface.co/Qwen/Qwen3-30B-A3B-Base).
+OLMoE has 64 experts per layer with 8 selected per token, 7B total parameters,
+and approximately 1B active parameters. Qwen3-MoE supplies a second
+architecture boundary without changing Power's model-neutral residency core.
 
 ## Current Status
 
@@ -71,17 +71,20 @@ and M7 Qwen3-MoE inference/service path are implemented and tested:
   of arguments, logs, model manifests, and decrypted intermediate files.
 - A fully resident Qwen3-MoE F32 CPU correctness backend with its distinct
   attention head dimension, per-head Q/K normalization, GQA, RoPE,
-  sparse/dense layer schedule, normalized top-k policy, fused 3-D expert
-  tensors, transactional KV cache, and greedy decoding.
+  sparse/dense layer schedule, normalized top-k policy, official per-expert
+  tensors or fused exporter tensors, transactional KV cache, and greedy
+  decoding.
 - A dependency-free full Qwen3-MoE decoder oracle covering logits, router
   logits, exact routes, dense-to-sparse layer transitions, prefill/decode
   parity, and sliding attention over the shared Power routing boundary.
-- Strict Qwen3-MoE Hugging Face shard-index validation, exact mixed
-  dense/sparse tensor inventories, resident checkpoint loading, and the shared
-  vocabulary-bounded tokenizer/stream decoder.
-- Bounded Qwen3-MoE conversion that reads fused 3-D experts through verified
-  Power tensor subranges, streams oversized dense tensors in chunks, and
-  publishes one atomic packed record for each sparse-layer expert.
+- Strict Qwen3-MoE Hugging Face shard-index validation for either the official
+  18,867-tensor split-expert layout or the 531-tensor fused exporter layout,
+  resident checkpoint loading, and the shared vocabulary-bounded
+  tokenizer/stream decoder.
+- Bounded Qwen3-MoE conversion that reads official gate/up/down matrices one
+  expert at a time, reads fused 3-D exporters through verified Power tensor
+  subranges, streams oversized dense tensors in chunks, and publishes one
+  atomic packed record for each sparse-layer expert.
 - A Qwen3-MoE streaming decoder that shares the resident attention, dense MLP,
   normalization, and transactional KV-cache implementation while delegating
   all expert residency to one Power hierarchy.
@@ -91,6 +94,10 @@ and M7 Qwen3-MoE inference/service path are implemented and tested:
 - A Qwen3-MoE Power backend and server composition path with automatic model
   family detection, concurrent request batching, OpenAI completion/chat
   streaming, and the same fail-closed request policy as OLMoE.
+- A pinned public Qwen3-MoE acceptance contract and independent Transformers
+  BF16 oracle generator, plus an architecture-aware Rust validator and
+  performance-evidence harness. The public 30B-A3B run remains an explicit
+  acceptance gate until its checked reports are committed.
 
 The HTTP transport, OpenAI response framing, authentication, rate limiting,
 metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
@@ -130,6 +137,7 @@ cargo test
 python tools/test_generate_public_oracle.py
 python tools/test_generate_qwen3_moe_oracle.py
 python tools/test_generate_qwen3_moe_full_oracle.py
+python tools/test_generate_qwen3_moe_public_oracle.py
 ```
 
 Verify the pinned public checkpoint's 3,219 tensor headers without downloading
@@ -159,6 +167,27 @@ binds that inventory and captures every prompt logit, router logit, selected
 expert, and route weight. The validator exits non-zero on provenance, tokenizer,
 argmax, route, or tolerance failure and always emits a versioned JSON report
 for a structurally valid numerical comparison.
+
+Generate the independent public Qwen3-MoE oracle after downloading the exact
+`Qwen/Qwen3-30B-A3B-Base` revision pinned in
+`tools/qwen3_moe_public_contract.py`, then compare it with the packed
+Power-streaming decoder:
+
+```shell
+PYTHONPATH=/src/transformers/src python \
+  tools/generate_qwen3_moe_public_oracle.py \
+  /models/Qwen3-30B-A3B-Base qwen3-moe-oracle.json
+cargo run --release --features validation --bin a3s-moe-validate -- \
+  /models/Qwen3-30B-A3B-Base qwen3-moe-oracle.json \
+  --packed-checkpoint /models/Qwen3-30B-A3B-Base-a3s \
+  --host-cache-mib 4096 > qwen3-moe-validation.json
+```
+
+The generator pins the model revision, all 16 shard byte lengths and SHA-256
+digests, the Transformers Git revision, its Qwen3-MoE source digest, CPU BF16
+execution, eager attention, and the input token IDs. The Rust validator
+re-hashes those files and the packed source binding before comparing every
+captured logit, router logit, route weight, selected expert, and token argmax.
 
 Convert a downloaded Hugging Face checkpoint without buffering a complete
 layer or model:
@@ -267,6 +296,18 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
   > olmoe-performance.json
 ```
 
+Qwen3-MoE uses the same harness and a family-specific evidence schema. Its
+public parity gate is the independent BF16 oracle, so it deliberately omits
+the memory-intensive resident F32 child:
+
+```shell
+cargo run --release --features benchmark --bin a3s-moe-bench -- \
+  /models/Qwen3-30B-A3B-Base-a3s \
+  --prompt "Bitcoin is" --max-tokens 8 --warm-samples 3 \
+  --host-cache-mib 4096 --checkpoint-label qwen3-30b-a3b-bf16 \
+  > qwen3-moe-performance.json
+```
+
 The first sample starts with an empty Power expert cache. Warm samples retain
 only the configured bounded cache. The report explicitly labels the operating
 system page cache as uncontrolled; it does not call that condition physical
@@ -297,14 +338,14 @@ python tools/generate_qwen3_moe_oracle.py
 python tools/generate_qwen3_moe_full_oracle.py
 ```
 
-M7 now provides resident CPU reference inference, strict Hugging Face
-checkpoint loading, tokenizer integration, fused-checkpoint conversion,
-Power-backed expert streaming, route-unioned continuous batching, and Power
-service composition for the second family. It reuses Power's model-neutral
-`RoutedExpertBatch`, verified tensor-range I/O, lifecycle, and sole residency
-hierarchy. Pinned public-model numerical and performance acceptance remain
-pending, so the implementation is not yet presented as a production-accepted
-Qwen3-MoE deployment.
+M7 now provides resident CPU reference inference, strict official split and
+fused-exporter checkpoint loading, tokenizer integration, bounded conversion,
+Power-backed expert streaming, route-unioned continuous batching, service
+composition, and pinned public acceptance tooling for the second family. It
+reuses Power's model-neutral `RoutedExpertBatch`, verified tensor-range I/O,
+lifecycle, and sole residency hierarchy. Pinned public-model numerical and
+performance reports remain pending, so the implementation is not yet
+presented as a production-accepted Qwen3-MoE deployment.
 
 ## License
 

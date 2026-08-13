@@ -27,9 +27,20 @@ pub(crate) struct ShardedSafeTensors {
 
 impl ShardedSafeTensors {
     pub(crate) fn open(root: &Path, required_names: Vec<String>) -> Result<Self> {
-        if required_names.is_empty() {
+        Ok(Self::open_one_of(root, vec![required_names])?.0)
+    }
+
+    pub(crate) fn open_one_of(
+        root: &Path,
+        required_inventories: Vec<Vec<String>>,
+    ) -> Result<(Self, usize)> {
+        if required_inventories.is_empty()
+            || required_inventories
+                .iter()
+                .any(|inventory| inventory.is_empty())
+        {
             return Err(MoeError::InvalidConfig(
-                "required tensor inventory must not be empty".to_string(),
+                "required tensor inventories must not be empty".to_string(),
             ));
         }
         let index_path = root.join(INDEX_FILE);
@@ -41,18 +52,15 @@ impl ShardedSafeTensors {
             ));
         }
 
-        let required = required_names.into_iter().collect::<BTreeSet<_>>();
-        if required.len() != index.weight_map.len() {
-            return Err(inventory_error(&index.weight_map, &required));
-        }
-        if let Some(missing) = required
+        let actual = index.weight_map.keys().cloned().collect::<BTreeSet<_>>();
+        let required = required_inventories
+            .into_iter()
+            .map(|names| names.into_iter().collect::<BTreeSet<_>>())
+            .collect::<Vec<_>>();
+        let inventory = required
             .iter()
-            .find(|name| !index.weight_map.contains_key(*name))
-        {
-            return Err(MoeError::InvalidConfig(format!(
-                "SafeTensor index is missing required tensor '{missing}'"
-            )));
-        }
+            .position(|candidate| candidate == &actual)
+            .ok_or_else(|| inventory_error(&actual, &required))?;
 
         let mut shard_names = BTreeSet::new();
         for shard in index.weight_map.values() {
@@ -76,11 +84,14 @@ impl ShardedSafeTensors {
             }
             shards.push(path);
         }
-        Ok(Self {
-            root: root.to_path_buf(),
-            shards,
-            weight_map: index.weight_map,
-        })
+        Ok((
+            Self {
+                root: root.to_path_buf(),
+                shards,
+                weight_map: index.weight_map,
+            },
+            inventory,
+        ))
     }
 
     pub(crate) fn root(&self) -> &Path {
@@ -127,17 +138,17 @@ impl ShardedSafeTensors {
     }
 }
 
-fn inventory_error(weight_map: &HashMap<String, String>, required: &BTreeSet<String>) -> MoeError {
-    let unexpected = weight_map
-        .keys()
-        .filter(|name| !required.contains(*name))
+fn inventory_error(actual: &BTreeSet<String>, required: &[BTreeSet<String>]) -> MoeError {
+    let unexpected = actual
+        .iter()
+        .filter(|name| required.iter().all(|inventory| !inventory.contains(*name)))
         .take(5)
         .cloned()
         .collect::<Vec<_>>();
+    let expected_counts = required.iter().map(BTreeSet::len).collect::<Vec<_>>();
     MoeError::InvalidConfig(format!(
-        "SafeTensor index contains {} tensors, expected {}; unexpected examples: {unexpected:?}",
-        weight_map.len(),
-        required.len()
+        "SafeTensor index contains {} tensors, expected one of {expected_counts:?}; unexpected examples: {unexpected:?}",
+        actual.len(),
     ))
 }
 

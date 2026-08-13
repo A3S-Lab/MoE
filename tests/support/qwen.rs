@@ -201,15 +201,73 @@ pub fn tiny_weights(config: &Qwen3MoeConfig) -> HashMap<String, Tensor> {
 pub fn write_source(root: &Path, dtype: DType) -> Qwen3MoeCheckpoint {
     fs::create_dir(root).unwrap();
     let config = tiny_config();
-    fs::write(
-        root.join("config.json"),
-        serde_json::to_vec_pretty(&config).unwrap(),
-    )
-    .unwrap();
     let weights = tiny_weights(&config)
         .into_iter()
         .map(|(name, tensor)| (name, tensor.to_dtype(dtype).unwrap()))
         .collect::<HashMap<_, _>>();
+    write_checkpoint(root, &config, weights)
+}
+
+pub fn write_split_source(root: &Path, dtype: DType) -> Qwen3MoeCheckpoint {
+    fs::create_dir(root).unwrap();
+    let config = tiny_config();
+    let mut weights = tiny_weights(&config)
+        .into_iter()
+        .map(|(name, tensor)| (name, tensor.to_dtype(dtype).unwrap()))
+        .collect::<HashMap<_, _>>();
+    for layer in 0..config.num_hidden_layers {
+        if !config.is_sparse_layer(layer) {
+            continue;
+        }
+        let prefix = format!("model.layers.{layer}.mlp.experts");
+        let gate_up = weights.remove(&format!("{prefix}.gate_up_proj")).unwrap();
+        let down = weights.remove(&format!("{prefix}.down_proj")).unwrap();
+        for expert in 0..config.num_experts {
+            let gate_up = gate_up.narrow(0, expert, 1).unwrap().squeeze(0).unwrap();
+            weights.insert(
+                format!("{prefix}.{expert}.gate_proj.weight"),
+                gate_up
+                    .narrow(0, 0, config.moe_intermediate_size)
+                    .unwrap()
+                    .contiguous()
+                    .unwrap(),
+            );
+            weights.insert(
+                format!("{prefix}.{expert}.up_proj.weight"),
+                gate_up
+                    .narrow(
+                        0,
+                        config.moe_intermediate_size,
+                        config.moe_intermediate_size,
+                    )
+                    .unwrap()
+                    .contiguous()
+                    .unwrap(),
+            );
+            weights.insert(
+                format!("{prefix}.{expert}.down_proj.weight"),
+                down.narrow(0, expert, 1)
+                    .unwrap()
+                    .squeeze(0)
+                    .unwrap()
+                    .contiguous()
+                    .unwrap(),
+            );
+        }
+    }
+    write_checkpoint(root, &config, weights)
+}
+
+fn write_checkpoint(
+    root: &Path,
+    config: &Qwen3MoeConfig,
+    weights: HashMap<String, Tensor>,
+) -> Qwen3MoeCheckpoint {
+    fs::write(
+        root.join("config.json"),
+        serde_json::to_vec_pretty(config).unwrap(),
+    )
+    .unwrap();
     let shard = "model-00001-of-00001.safetensors";
     candle_core::safetensors::save(&weights, root.join(shard)).unwrap();
     let weight_map = weights

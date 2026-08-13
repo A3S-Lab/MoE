@@ -1,23 +1,29 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use a3s_moe::olmoe::{OlmoeCheckpoint, OlmoeConfig, OlmoeCpuModel, OlmoeTokenizer};
-use a3s_moe::service::{OlmoeBackend, OlmoeBackendConfig, OlmoeDeviceSpec};
+use a3s_moe::olmoe::{OlmoeCheckpoint, OlmoeConfig, OlmoeCpuModel};
+use a3s_moe::qwen3_moe::Qwen3MoeConfig;
+use a3s_moe::service::{
+    MoeBackendConfig, MoeDeviceSelection, MoeDeviceSpec, OlmoeBackend, Qwen3MoeBackend,
+};
+use a3s_moe::{MoeArchitecture, MoeTokenizer};
 use a3s_power::backend::types::CompletionRequest;
 use a3s_power::backend::Backend;
-use a3s_power::inference::{
-    DevicePreference, InferenceLimits, PlacementTelemetry, ResidencyPolicy, RuntimeDeviceIdentity,
-    TelemetryMode,
-};
+use a3s_power::error::Result as PowerResult;
+use a3s_power::inference::{InferenceLimits, PlacementTelemetry, ResidencyPolicy, TelemetryMode};
+use a3s_power::model::manifest::ModelManifest;
 use anyhow::{Context, Result};
 use candle_core::{Device, IndexOp, Tensor};
 use clap::Parser;
 use futures::StreamExt;
-use serde::Serialize;
+
+#[path = "a3s-moe-bench/evidence.rs"]
+mod evidence;
+use evidence::*;
 
 #[derive(Debug, Parser)]
-#[command(about = "Emit reproducible JSON performance evidence for packed OLMoE")]
+#[command(about = "Emit reproducible JSON performance evidence for packed MoE inference")]
 struct Args {
     /// Self-contained checkpoint created by a3s-moe-pack.
     checkpoint: PathBuf,
@@ -26,7 +32,7 @@ struct Args {
     #[arg(long)]
     prompt: String,
 
-    /// Optional original Hugging Face checkpoint for the resident CPU baseline.
+    /// Optional original OLMoE checkpoint for an isolated resident baseline.
     #[arg(long)]
     resident_checkpoint: Option<PathBuf>,
 
@@ -34,8 +40,8 @@ struct Args {
     #[arg(long)]
     checkpoint_label: Option<String>,
 
-    #[arg(long, default_value = "olmoe-benchmark")]
-    model: String,
+    #[arg(long)]
+    model: Option<String>,
 
     #[arg(long, default_value_t = 16)]
     max_tokens: u32,
@@ -49,7 +55,7 @@ struct Args {
 
     /// Typed execution device: auto, cpu, cuda:<ordinal>, or metal:<ordinal>.
     #[arg(long, default_value = "cpu")]
-    device: OlmoeDeviceSpec,
+    device: MoeDeviceSpec,
 
     #[arg(long, default_value_t = 0)]
     device_cache_mib: u64,
@@ -59,146 +65,56 @@ struct Args {
     resident_baseline_only: bool,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BenchmarkEvidence {
-    schema: &'static str,
-    generated_at: String,
-    implementation: ImplementationEvidence,
-    model: ModelEvidence,
-    system: SystemEvidence,
-    configuration: ConfigurationEvidence,
-    cache_state: CacheStateEvidence,
-    load: LoadEvidence,
-    first_generation: InferenceSample,
-    warm_generations: Vec<InferenceSample>,
-    warm_summary: SampleSummary,
-    placement: PlacementDelta,
-    process_peak_rss_bytes: Option<u64>,
-    resident_baseline: Option<ResidentBaseline>,
+enum BenchmarkBackend {
+    Olmoe(Arc<OlmoeBackend>),
+    Qwen3Moe(Arc<Qwen3MoeBackend>),
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ImplementationEvidence {
-    crate_name: &'static str,
-    crate_version: &'static str,
-    power_revision: &'static str,
-    execution: &'static str,
-}
+impl BenchmarkBackend {
+    fn new(architecture: MoeArchitecture, config: MoeBackendConfig) -> Result<Self> {
+        Ok(match architecture {
+            MoeArchitecture::Olmoe => Self::Olmoe(Arc::new(OlmoeBackend::new(config)?)),
+            MoeArchitecture::Qwen3Moe => Self::Qwen3Moe(Arc::new(Qwen3MoeBackend::new(config)?)),
+        })
+    }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ModelEvidence {
-    name: String,
-    weights_sha256: String,
-    packed_checkpoint: String,
-    packed_bytes: u64,
-}
+    async fn preload(&self, model: &str, checkpoint: &Path) -> PowerResult<ModelManifest> {
+        match self {
+            Self::Olmoe(backend) => backend.preload(model, checkpoint, None).await,
+            Self::Qwen3Moe(backend) => backend.preload(model, checkpoint, None).await,
+        }
+    }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SystemEvidence {
-    os: &'static str,
-    architecture: &'static str,
-    logical_parallelism: usize,
-    processor: Option<String>,
-}
+    fn telemetry(&self, model: &str) -> PowerResult<PlacementTelemetry> {
+        match self {
+            Self::Olmoe(backend) => backend.telemetry(model),
+            Self::Qwen3Moe(backend) => backend.telemetry(model),
+        }
+    }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ConfigurationEvidence {
-    prompt_bytes: usize,
-    prompt_tokens: usize,
-    max_new_tokens: u32,
-    warm_samples: usize,
-    temperature: f32,
-    host_cache_bytes: u64,
-    device_cache_bytes: u64,
-    effective_device_cache_bytes: u64,
-    requested_device: DevicePreference,
-    resolved_device: RuntimeDeviceIdentity,
-    automatic_cpu_fallback: bool,
-}
+    fn device_selection(&self, model: &str) -> PowerResult<MoeDeviceSelection> {
+        match self {
+            Self::Olmoe(backend) => backend.device_selection(model),
+            Self::Qwen3Moe(backend) => backend.device_selection(model),
+        }
+    }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CacheStateEvidence {
-    power_first_generation: &'static str,
-    power_warm_generations: &'static str,
-    operating_system_page_cache: &'static str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LoadEvidence {
-    packed_streaming_ns: u64,
-    resident_baseline_ns: Option<u64>,
-}
-
-#[derive(Debug, serde::Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct InferenceSample {
-    total_ns: u64,
-    time_to_first_token_ns: u64,
-    model_prompt_eval_ns: Option<u64>,
-    generated_tokens: usize,
-    tokens_per_second: f64,
-    token_ids: Vec<u32>,
-    done_reason: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SampleSummary {
-    samples: usize,
-    mean_total_ns: f64,
-    mean_time_to_first_token_ns: f64,
-    mean_tokens_per_second: f64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PlacementDelta {
-    first_storage_reads: u64,
-    first_storage_bytes_read: u64,
-    warm_storage_reads: u64,
-    warm_storage_bytes_read: u64,
-    host_cache_hits: u64,
-    host_resident_bytes: u64,
-    host_evictions: u64,
-    staged_peak_inflight_bytes: u64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ResidentBaseline {
-    load_ns: u64,
-    sample: InferenceSample,
-    token_parity_with_streaming: bool,
-    process_peak_rss_bytes: Option<u64>,
-}
-
-#[derive(serde::Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ResidentChildEvidence {
-    load_ns: u64,
-    sample: InferenceSample,
-    process_peak_rss_bytes: Option<u64>,
+    async fn sample(&self, model: &str, prompt: &str, max_tokens: u32) -> Result<InferenceSample> {
+        match self {
+            Self::Olmoe(backend) => {
+                run_streaming(backend.as_ref(), model, prompt, max_tokens).await
+            }
+            Self::Qwen3Moe(backend) => {
+                run_streaming(backend.as_ref(), model, prompt, max_tokens).await
+            }
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    if args.prompt.is_empty() {
-        anyhow::bail!("--prompt must not be empty");
-    }
-    if args.max_tokens == 0 {
-        anyhow::bail!("--max-tokens must be greater than zero");
-    }
-    if args.warm_samples == 0 {
-        anyhow::bail!("--warm-samples must be greater than zero");
-    }
+    validate_arguments(&args)?;
     if args.resident_baseline_only {
         return run_resident_child(&args);
     }
@@ -209,63 +125,69 @@ async fn main() -> Result<()> {
             args.checkpoint.display()
         )
     })?;
-    let checkpoint_label = match args.checkpoint_label.as_deref() {
-        Some(label) if label.trim().is_empty() => {
-            anyhow::bail!("--checkpoint-label must not be empty")
-        }
-        Some(label) => label.to_string(),
-        None => checkpoint
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("packed-checkpoint")
-            .to_string(),
-    };
-    let config = OlmoeConfig::from_json_path(checkpoint.join("config.json"))?;
-    let tokenizer =
-        OlmoeTokenizer::from_file(checkpoint.join("tokenizer.json"), config.vocab_size)?;
+    let architecture = MoeArchitecture::detect(&checkpoint)?;
+    if architecture == MoeArchitecture::Qwen3Moe && args.resident_checkpoint.is_some() {
+        anyhow::bail!(
+            "the public Qwen3-MoE gate uses the independent oracle for parity; \
+             --resident-checkpoint is available only for OLMoE"
+        );
+    }
+    let model_name = args
+        .model
+        .clone()
+        .unwrap_or_else(|| format!("{}-benchmark", architecture.default_model_name()));
+    let checkpoint_label = checkpoint_label(&args, &checkpoint)?;
+    let (vocabulary_size, context_length) = model_geometry(architecture, &checkpoint)?;
+    let tokenizer = MoeTokenizer::from_file(checkpoint.join("tokenizer.json"), vocabulary_size)?;
     let prompt_tokens = tokenizer.encode(&args.prompt, true)?;
     let host_cache_bytes = mib(args.host_cache_mib)?;
     let device_cache_bytes = mib(args.device_cache_mib)?;
-    let limits = InferenceLimits {
-        max_context_tokens: config.max_position_embeddings,
-        max_generated_tokens: args.max_tokens as usize,
-        max_concurrent_requests: 1,
-        max_queued_requests: 1,
-        ..InferenceLimits::default()
-    };
-    let backend = Arc::new(OlmoeBackend::new(OlmoeBackendConfig {
-        device: args.device.preference(),
-        inference_limits: limits,
-        residency_policy: ResidencyPolicy {
-            host_cache_bytes,
-            device_cache_bytes,
-            max_background_inflight_bytes: 512 * 1024 * 1024,
-            telemetry: TelemetryMode::Aggregate,
-            ..ResidencyPolicy::default()
+    let backend = BenchmarkBackend::new(
+        architecture,
+        MoeBackendConfig {
+            device: args.device.preference(),
+            inference_limits: InferenceLimits {
+                max_context_tokens: context_length,
+                max_generated_tokens: args.max_tokens as usize,
+                max_concurrent_requests: 1,
+                max_queued_requests: 1,
+                ..InferenceLimits::default()
+            },
+            residency_policy: ResidencyPolicy {
+                host_cache_bytes,
+                device_cache_bytes,
+                max_background_inflight_bytes: 512 * 1024 * 1024,
+                telemetry: TelemetryMode::Aggregate,
+                ..ResidencyPolicy::default()
+            },
+            stream_capacity: 8,
+            batch_window: Duration::ZERO,
+            default_max_tokens: args.max_tokens as usize,
         },
-        stream_capacity: 8,
-        batch_window: Duration::ZERO,
-        default_max_tokens: args.max_tokens as usize,
-    })?);
+    )?;
 
     let load_started = Instant::now();
     let manifest = backend
-        .preload(&args.model, &checkpoint, None)
+        .preload(&model_name, &checkpoint)
         .await
         .context("failed to preload the packed checkpoint")?;
     let packed_load_ns = duration_ns(load_started.elapsed());
-    let device = backend.device_selection(&args.model)?;
+    let device = backend.device_selection(&model_name)?;
 
-    let before_first = backend.telemetry(&args.model)?;
-    let first_generation =
-        run_streaming(&backend, &args.model, &args.prompt, args.max_tokens).await?;
-    let after_first = backend.telemetry(&args.model)?;
+    let before_first = backend.telemetry(&model_name)?;
+    let first_generation = backend
+        .sample(&model_name, &args.prompt, args.max_tokens)
+        .await?;
+    let after_first = backend.telemetry(&model_name)?;
     let mut warm_generations = Vec::with_capacity(args.warm_samples);
     for _ in 0..args.warm_samples {
-        warm_generations
-            .push(run_streaming(&backend, &args.model, &args.prompt, args.max_tokens).await?);
+        warm_generations.push(
+            backend
+                .sample(&model_name, &args.prompt, args.max_tokens)
+                .await?,
+        );
     }
-    let after_warm = backend.telemetry(&args.model)?;
+    let after_warm = backend.telemetry(&model_name)?;
 
     let streaming_process_peak_rss_bytes = process_peak_rss_bytes();
     let resident_baseline = match args.resident_checkpoint.as_ref() {
@@ -283,7 +205,10 @@ async fn main() -> Result<()> {
     let resident_load_ns = resident_baseline.as_ref().map(|baseline| baseline.load_ns);
 
     let evidence = BenchmarkEvidence {
-        schema: "a3s.moe.olmoe-performance.v1",
+        schema: match architecture {
+            MoeArchitecture::Olmoe => OLMOE_SCHEMA,
+            MoeArchitecture::Qwen3Moe => QWEN3_MOE_SCHEMA,
+        },
         generated_at: chrono::Utc::now().to_rfc3339(),
         implementation: ImplementationEvidence {
             crate_name: env!("CARGO_PKG_NAME"),
@@ -293,6 +218,7 @@ async fn main() -> Result<()> {
         },
         model: ModelEvidence {
             name: manifest.name,
+            family: architecture.model_type(),
             weights_sha256: manifest.sha256,
             packed_checkpoint: checkpoint_label,
             packed_bytes: manifest.size,
@@ -339,11 +265,54 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn validate_arguments(args: &Args) -> Result<()> {
+    if args.prompt.is_empty() {
+        anyhow::bail!("--prompt must not be empty");
+    }
+    if args.max_tokens == 0 {
+        anyhow::bail!("--max-tokens must be greater than zero");
+    }
+    if args.warm_samples == 0 {
+        anyhow::bail!("--warm-samples must be greater than zero");
+    }
+    Ok(())
+}
+
+fn checkpoint_label(args: &Args, checkpoint: &Path) -> Result<String> {
+    match args.checkpoint_label.as_deref() {
+        Some(label) if label.trim().is_empty() => {
+            anyhow::bail!("--checkpoint-label must not be empty")
+        }
+        Some(label) => Ok(label.to_string()),
+        None => Ok(checkpoint
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("packed-checkpoint")
+            .to_string()),
+    }
+}
+
+fn model_geometry(architecture: MoeArchitecture, checkpoint: &Path) -> Result<(usize, usize)> {
+    Ok(match architecture {
+        MoeArchitecture::Olmoe => {
+            let config = OlmoeConfig::from_json_path(checkpoint.join("config.json"))?;
+            (config.vocab_size, config.max_position_embeddings)
+        }
+        MoeArchitecture::Qwen3Moe => {
+            let config = Qwen3MoeConfig::from_json_path(checkpoint.join("config.json"))?;
+            (config.vocab_size, config.max_position_embeddings)
+        }
+    })
+}
+
 fn run_resident_child(args: &Args) -> Result<()> {
     let path = args
         .resident_checkpoint
         .as_ref()
         .context("resident child mode requires --resident-checkpoint")?;
+    if MoeArchitecture::detect(path)? != MoeArchitecture::Olmoe {
+        anyhow::bail!("resident baseline child supports only OLMoE");
+    }
     let load_started = Instant::now();
     let checkpoint = OlmoeCheckpoint::open(path)?;
     let tokenizer = checkpoint.load_tokenizer()?;
@@ -368,7 +337,7 @@ fn run_resident_child(args: &Args) -> Result<()> {
 
 async fn run_resident_subprocess(
     args: &Args,
-    resident_checkpoint: &std::path::Path,
+    resident_checkpoint: &Path,
 ) -> Result<ResidentChildEvidence> {
     let executable = std::env::current_exe().context("failed to resolve benchmark executable")?;
     let checkpoint = args.checkpoint.clone();
@@ -396,8 +365,8 @@ async fn run_resident_subprocess(
     serde_json::from_slice(&output.stdout).context("resident baseline emitted invalid JSON")
 }
 
-async fn run_streaming(
-    backend: &OlmoeBackend,
+async fn run_streaming<B: Backend>(
+    backend: &B,
     model: &str,
     prompt: &str,
     max_tokens: u32,
@@ -478,61 +447,6 @@ fn run_resident(
         token_ids,
         done_reason,
     })
-}
-
-fn summarize(samples: &[InferenceSample]) -> SampleSummary {
-    let count = samples.len() as f64;
-    SampleSummary {
-        samples: samples.len(),
-        mean_total_ns: samples
-            .iter()
-            .map(|sample| sample.total_ns as f64)
-            .sum::<f64>()
-            / count,
-        mean_time_to_first_token_ns: samples
-            .iter()
-            .map(|sample| sample.time_to_first_token_ns as f64)
-            .sum::<f64>()
-            / count,
-        mean_tokens_per_second: samples
-            .iter()
-            .map(|sample| sample.tokens_per_second)
-            .sum::<f64>()
-            / count,
-    }
-}
-
-fn placement_delta(
-    before: &PlacementTelemetry,
-    first: &PlacementTelemetry,
-    warm: &PlacementTelemetry,
-) -> PlacementDelta {
-    PlacementDelta {
-        first_storage_reads: first.storage_reads.saturating_sub(before.storage_reads),
-        first_storage_bytes_read: first
-            .storage_bytes_read
-            .saturating_sub(before.storage_bytes_read),
-        warm_storage_reads: warm.storage_reads.saturating_sub(first.storage_reads),
-        warm_storage_bytes_read: warm
-            .storage_bytes_read
-            .saturating_sub(first.storage_bytes_read),
-        host_cache_hits: warm.host_cache_hits.saturating_sub(before.host_cache_hits),
-        host_resident_bytes: warm.host_resident_bytes,
-        host_evictions: warm.host_evictions.saturating_sub(before.host_evictions),
-        staged_peak_inflight_bytes: warm.staged_peak_inflight_bytes,
-    }
-}
-
-fn throughput(tokens: usize, duration: Duration) -> f64 {
-    if duration.is_zero() {
-        0.0
-    } else {
-        tokens as f64 / duration.as_secs_f64()
-    }
-}
-
-fn duration_ns(duration: Duration) -> u64 {
-    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
 
 fn mib(value: u64) -> Result<u64> {

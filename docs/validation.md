@@ -8,6 +8,12 @@
   `53a94a479f9904674a5f45aba0387c13466a1f2a2d3cdb9226f9cf58946ebbf8`)
 - OLMoE-1B-7B-0924 checkpoint:
   `6d84c48581ece794365f2b8e9cfb043c68ade9c5`
+- Transformers Qwen3-MoE equations:
+  `918dbf131d0df5b46e3f6e1d96174d62aa4d16d6`
+  (`modeling_qwen3_moe.py` SHA-256
+  `56d820671d810b68f31056605cec0c674994c8f962370194225911ac6a71a365`)
+- Qwen3-30B-A3B-Base checkpoint:
+  `1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9`
 - A3S Power composition, process-local manifest, and packed-record contract:
   `be82555`
 
@@ -24,7 +30,7 @@
 - Complete streaming decoder logits and routes match the fully resident model
   within `2e-5`, including BF16 source conversion and greedy decode.
 
-### Public-checkpoint oracle
+### OLMoE public-checkpoint oracle
 
 `tools/generate_public_oracle.py` imports Transformers only from a Git checkout
 whose `HEAD` and OLMoE source SHA-256 match the pinned values. It loads the
@@ -89,9 +95,11 @@ from evidence rather than guessed.
 - Exact token-ID prompt digests are exposed for rendered chat prompts.
 - A real `a3s-moe-server` subprocess passes model listing, non-streaming OpenAI
   completion, and SSE completion tests through Power's HTTP router.
-- The benchmark regression validates the versioned JSON schema, TTFT,
-  generated-token count, expert bytes read, cache-state labels, process peak
-  RSS, and token parity with an isolated resident CPU child process.
+- The benchmark regressions validate each architecture's versioned JSON schema,
+  TTFT, generated-token count, expert bytes read, cache-state labels, and
+  process peak RSS. OLMoE additionally validates token parity with an isolated
+  resident CPU child; Qwen3-MoE deliberately uses the independent public
+  oracle as its parity gate.
 
 ## Encrypted Checkpoint Gates
 
@@ -130,16 +138,17 @@ remains an M6 acceptance item on a confidential-computing host.
 - Full prefill matches token-at-a-time KV-cache decode for both unrestricted
   causal attention and a two-token sliding window. Cache-limit failures leave
   the caller's transactional state unchanged.
-- The Hugging Face loader requires the exact 531-tensor published inventory,
+- The Hugging Face loader requires either the exact 18,867-tensor official
+  split-expert inventory or the exact 531-tensor fused-exporter inventory,
   validates each shard as a regular path-safe file, checks index-to-shard
   ownership while loading, and handles mixed dense/sparse MLP names without
   duplicating OLMoE's security boundary.
 - The Qwen3-MoE sparse result is expressed directly as Power's unchanged
   `RoutedExpertBatch`; no model-specific Power type or cache was added.
-- Fused gate/up and down tensors larger than the conversion budget are sliced
-  one expert at a time through Power's verified subrange API. Dense tensors
-  larger than the same budget are copied in bounded chunks into valid
-  SafeTensor files.
+- Official split gate/up/down matrices are read one expert at a time. Fused
+  gate/up and down tensors larger than the conversion budget are sliced through
+  Power's verified subrange API. Dense tensors larger than the same budget are
+  copied in bounded chunks into valid SafeTensor files.
 - Packed manifests bind exact dense and sparse-only expert inventories. Dense
   schedule layers have no expert records, and each sparse layer has exactly
   `num_experts` atomic records.
@@ -157,11 +166,21 @@ remains an M6 acceptance item on a confidential-computing host.
 - A real server subprocess automatically detects a packed Qwen3-MoE
   checkpoint and passes Power model listing, non-streaming OpenAI completion,
   and SSE completion tests using the default `qwen3-moe` model identifier.
+- The public oracle generator requires the exact pinned 16-shard checkpoint,
+  Transformers revision and source digest, runs eager CPU BF16 equations, and
+  captures every prompt logit plus each sparse layer's router logits and
+  normalized top-k routes. The Rust validator re-hashes the source inventory,
+  verifies the packed checkpoint's source digest/config/tokenizer binding, and
+  compares all values, expert IDs, and token argmaxes.
+- Provenance rejection, numerical failure reporting, official split conversion,
+  and Qwen3-MoE performance-schema output are covered by deterministic tiny
+  regression checkpoints.
 
 These gates accept the resident CPU reference backend, source checkpoint
-loader, tokenizer boundary, packed conversion, and Power-backed expert
-streaming, continuous batching, and service composition. They do not yet
-accept a public 30B-A3B numerical or performance run.
+loader, tokenizer boundary, packed conversion, Power-backed expert streaming,
+continuous batching, service composition, and public acceptance tooling. They
+do not yet accept a public 30B-A3B numerical or performance run; that status
+requires checked reports from the pinned complete checkpoint.
 
 The benchmark's first generation is application-cold with respect to Power's
 expert cache. Integrity verification may already populate the operating-system
