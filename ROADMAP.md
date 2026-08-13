@@ -3,13 +3,13 @@
 | Milestone | Status | Exit criterion |
 | --- | --- | --- |
 | M0 Contracts and oracle | Complete | Exact OLMoE routes and sparse-layer output match pinned fixtures; packed `U8` records survive Power staging. |
-| M1 CPU correctness | In progress | Resident decoder, loader, tokenizer, and KV cache pass tiny oracles; full public-checkpoint parity still required. |
+| M1 CPU correctness | Complete | Resident decoder, loader, tokenizer, and KV cache pass tiny and pinned public-checkpoint numerical oracles. |
 | M2 Streaming residency | Complete | Exact routed experts execute through the sole Power hierarchy under a measured memory bound. |
 | M3 Continuous batching | Complete | Route-unioned batches retain single-request parity and load each active expert once per step. |
-| M4 Service and performance | In progress | Service, sampling, streaming, and the evidence harness are complete; a representative public-checkpoint artifact remains. |
+| M4 Service and performance | Complete | Service, sampling, streaming, HTTP/SSE smoke tests, and a representative public-checkpoint CPU artifact pass. |
 | M5 GPU execution | In progress | Device-native graph and explicit fallback evidence are implemented; CUDA/Metal public-checkpoint parity remains. |
 | M6 TEE | In progress | Seekable encrypted records pass bounded-memory, integrity, cancellation, and service tests; attested key release on a real confidential host remains. |
-| M7 Second architecture | In progress | Qwen3-MoE config and sparse math reuse the unchanged Power route contract; complete decoder, fused-checkpoint streaming, and service acceptance remain. |
+| M7 Second architecture | In progress | Qwen3-MoE resident decoding, bounded fused-checkpoint conversion, and Power expert streaming pass; service composition and pinned public-checkpoint acceptance remain. |
 
 Detailed ownership and acceptance rules live in
 [docs/architecture.md](docs/architecture.md).

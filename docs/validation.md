@@ -9,7 +9,7 @@
 - OLMoE-1B-7B-0924 checkpoint:
   `6d84c48581ece794365f2b8e9cfb043c68ade9c5`
 - A3S Power composition, process-local manifest, and packed-record contract:
-  `3f348a5`
+  `be82555`
 
 ## Numerical Gates
 
@@ -113,7 +113,7 @@ These gates validate the software boundary and bounded decrypted buffers. They
 do not claim remote attestation or hardware-isolated execution; that evidence
 remains an M6 acceptance item on a confidential-computing host.
 
-## Qwen3-MoE Resident Backend Gates
+## Qwen3-MoE Resident and Streaming Gates
 
 - The published 30B-A3B geometry validates an explicit 128-wide attention head
   even though `hidden_size / num_attention_heads` is 64, preventing OLMoE's
@@ -136,10 +136,22 @@ remains an M6 acceptance item on a confidential-computing host.
   duplicating OLMoE's security boundary.
 - The Qwen3-MoE sparse result is expressed directly as Power's unchanged
   `RoutedExpertBatch`; no model-specific Power type or cache was added.
+- Fused gate/up and down tensors larger than the conversion budget are sliced
+  one expert at a time through Power's verified subrange API. Dense tensors
+  larger than the same budget are copied in bounded chunks into valid
+  SafeTensor files.
+- Packed manifests bind exact dense and sparse-only expert inventories. Dense
+  schedule layers have no expert records, and each sparse layer has exactly
+  `num_experts` atomic records.
+- Mixed-layer streaming F32 logits, router logits, and exact routes match the
+  resident backend within `2e-5`; a BF16 packed checkpoint produces identical
+  greedy token IDs while using one bounded Power host cache.
+- The pack CLI detects `qwen3_moe` from the validated source configuration and
+  emits the same path-explicit conversion evidence schema as OLMoE.
 
 These gates accept the resident CPU reference backend, source checkpoint
-loader, and tokenizer boundary. They do not yet accept Qwen3-MoE packed
-conversion, Power-backed expert streaming, service composition, or a public
+loader, tokenizer boundary, packed conversion, and Power-backed expert
+streaming. They do not yet accept Qwen3-MoE service composition or a public
 30B-A3B checkpoint run.
 
 The benchmark's first generation is application-cold with respect to Power's

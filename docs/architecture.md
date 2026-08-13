@@ -65,6 +65,12 @@ a bounded number of atomic records from one layer. Power opens only
 `experts/` for residency, preventing resident dense weights from being counted
 or duplicated in the expert cache. The converter publishes the destination
 only after both collections have been reopened and their digests recorded.
+Qwen3-MoE source checkpoints fuse every layer's experts into two large 3-D
+tensors. Conversion uses Power's integrity-verified tensor-subrange API to read
+one expert slice at a time, and uses the same bounded range API to stream dense
+tensors larger than the conversion budget into valid one-tensor SafeTensor
+files. The declared buffer limit therefore applies without relying on the
+source tensor being smaller than that limit.
 
 Only `WeightHierarchy` owns resident bytes. Model code may hold short-lived
 views for the current operation but cannot retain a parallel byte cache.
@@ -211,7 +217,7 @@ fine-tune. It does not present the base model as instruction-tuned.
   memory bounds, numerical parity, and service generation are tested.
 - M6 pending acceptance: integrate an attested key-release provider and record
   peak-memory and inference evidence on a real confidential-computing host.
-- M7 implemented reference backend: Qwen3-MoE validates its independent head
+- M7 implemented inference path: Qwen3-MoE validates its independent head
   dimension, sparse/dense layer schedule, MoE-specific intermediate width, and
   normalized top-k policy. Its resident F32 CPU decoder implements per-head
   Q/K normalization, GQA, RoPE, optional sliding attention, fused 3-D expert
@@ -221,9 +227,14 @@ fine-tune. It does not present the base model as instruction-tuned.
   sparse layers. The second family also reuses a single hardened SafeTensor
   shard-index loader and vocabulary-bounded tokenizer while supplying its own
   exact mixed dense/sparse tensor inventory.
-- M7 pending implementation: add fused-checkpoint conversion, Power-backed
-  expert streaming and service composition, plus pinned public-model numerical
-  and performance acceptance.
+- M7 implemented streaming path: fused 3-D expert arrays are converted through
+  verified bounded subranges into the shared lossless expert record; oversized
+  dense tensors copy in bounded chunks; exact packed inventories and digests
+  fail closed; and mixed dense/sparse execution shares the resident decoder
+  state while every sparse layer uses one Power hierarchy. Tiny F32 forward,
+  BF16 generation, exact-route, cache-bound, and CLI auto-detection tests pass.
+- M7 pending implementation and acceptance: add service composition, then pin
+  and run the public Qwen3-MoE checkpoint numerical and performance gates.
 
 ## Acceptance Gates
 

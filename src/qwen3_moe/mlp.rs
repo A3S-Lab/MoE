@@ -15,7 +15,7 @@ pub(super) struct DenseMlp {
 }
 
 impl DenseMlp {
-    fn load(config: &Qwen3MoeConfig, builder: VarBuilder<'_>) -> Result<Self> {
+    pub(super) fn load(config: &Qwen3MoeConfig, builder: VarBuilder<'_>) -> Result<Self> {
         Ok(Self {
             gate: candle_nn::linear_no_bias(
                 config.hidden_size,
@@ -35,7 +35,7 @@ impl DenseMlp {
         })
     }
 
-    fn forward(&self, hidden_states: &Tensor) -> Result<Tensor> {
+    pub(super) fn forward(&self, hidden_states: &Tensor) -> Result<Tensor> {
         let gate = candle_nn::ops::silu(&self.gate.forward(hidden_states)?)?;
         Ok(self
             .down
@@ -67,7 +67,7 @@ pub(super) struct SparseMlp {
 }
 
 impl SparseMlp {
-    fn load(config: &Qwen3MoeConfig, builder: VarBuilder<'_>) -> Result<Self> {
+    pub(super) fn load(config: &Qwen3MoeConfig, builder: VarBuilder<'_>) -> Result<Self> {
         let moe = config.moe_config()?;
         let router =
             candle_nn::linear_no_bias(config.hidden_size, config.num_experts, builder.pp("gate"))?;
@@ -116,7 +116,11 @@ impl SparseMlp {
         })
     }
 
-    fn forward(&self, layer: u32, hidden_states: &Tensor) -> Result<Qwen3MoeMlpOutput> {
+    pub(super) fn forward(
+        &self,
+        layer: u32,
+        hidden_states: &Tensor,
+    ) -> Result<Qwen3MoeSparseMlpOutput> {
         let (batch_size, sequence_length, hidden_size) = hidden_states.dims3()?;
         let positions = batch_size
             .checked_mul(sequence_length)
@@ -171,51 +175,20 @@ impl SparseMlp {
                 .broadcast_mul(&route_weights)?;
             output = output.index_add(&indices, &contribution, 0)?;
         }
-        Ok(Qwen3MoeMlpOutput {
+        Ok(Qwen3MoeSparseMlpOutput {
             hidden_states: output.reshape((batch_size, sequence_length, hidden_size))?,
-            router_logits: Some(router_logits.reshape((
+            router_logits: router_logits.reshape((
                 batch_size,
                 sequence_length,
                 self.config.num_experts,
-            ))?),
-            routes: Some(routes),
+            ))?,
+            routes,
         })
     }
 }
 
-#[derive(Debug, Clone)]
-pub(super) enum Qwen3MoeMlp {
-    Dense(DenseMlp),
-    Sparse(SparseMlp),
-}
-
-pub(super) struct Qwen3MoeMlpOutput {
+pub(super) struct Qwen3MoeSparseMlpOutput {
     pub hidden_states: Tensor,
-    pub router_logits: Option<Tensor>,
-    pub routes: Option<RoutedExpertBatch>,
-}
-
-impl Qwen3MoeMlp {
-    pub(super) fn load(
-        config: &Qwen3MoeConfig,
-        layer: usize,
-        builder: VarBuilder<'_>,
-    ) -> Result<Self> {
-        if config.is_sparse_layer(layer) {
-            Ok(Self::Sparse(SparseMlp::load(config, builder)?))
-        } else {
-            Ok(Self::Dense(DenseMlp::load(config, builder)?))
-        }
-    }
-
-    pub(super) fn forward(&self, layer: u32, hidden_states: &Tensor) -> Result<Qwen3MoeMlpOutput> {
-        match self {
-            Self::Dense(mlp) => Ok(Qwen3MoeMlpOutput {
-                hidden_states: mlp.forward(hidden_states)?,
-                router_logits: None,
-                routes: None,
-            }),
-            Self::Sparse(mlp) => mlp.forward(layer, hidden_states),
-        }
-    }
+    pub router_logits: Tensor,
+    pub routes: RoutedExpertBatch,
 }

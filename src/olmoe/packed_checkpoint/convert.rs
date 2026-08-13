@@ -1,68 +1,24 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use a3s_power::inference::{InferenceLimits, TensorDescriptor, TensorRead, WeightStore};
-use safetensors::tensor::{serialize_to_file, TensorView};
-use safetensors::Dtype;
-use serde::{Deserialize, Serialize};
+use a3s_power::inference::{InferenceLimits, WeightStore};
 
 use crate::olmoe::checkpoint::dense_tensor_names;
 use crate::olmoe::{
     packed_expert_tensor_name, OlmoeCheckpoint, OlmoePackedManifest, PackedExpertRecord,
     PackedScalarType,
 };
+use crate::packing::{
+    absolute_destination, convert_dense_tensors, descriptor, ensure_buffer_bound, packed_scalar,
+    validate_matrix_descriptor, write_packed_records,
+};
 use crate::{MoeError, Result};
+use crate::{PackedConversionOptions, PackedConversionReport};
 
 use super::{CONFIG_FILE, DENSE_DIRECTORY, EXPERT_DIRECTORY, MANIFEST_FILE, TOKENIZER_FILE};
 
-const DEFAULT_MAX_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
-
-/// Deterministic bounds for converting a Hugging Face checkpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OlmoeConversionOptions {
-    pub experts_per_file: usize,
-    pub max_buffer_bytes: u64,
-}
-
-impl Default for OlmoeConversionOptions {
-    fn default() -> Self {
-        Self {
-            experts_per_file: 8,
-            max_buffer_bytes: DEFAULT_MAX_BUFFER_BYTES,
-        }
-    }
-}
-
-impl OlmoeConversionOptions {
-    fn validate(self, num_experts: usize) -> Result<Self> {
-        if self.experts_per_file == 0 || self.experts_per_file > num_experts {
-            return Err(MoeError::InvalidConfig(format!(
-                "experts_per_file must be within 1..={num_experts}"
-            )));
-        }
-        if self.max_buffer_bytes == 0 {
-            return Err(MoeError::InvalidConfig(
-                "max_buffer_bytes must be non-zero".to_string(),
-            ));
-        }
-        Ok(self)
-    }
-}
-
-/// Reproducible evidence returned after a completed conversion.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OlmoeConversionReport {
-    pub destination: PathBuf,
-    pub source_weights_sha256: String,
-    pub dense_weights_sha256: String,
-    pub expert_weights_sha256: String,
-    pub dense_files: usize,
-    pub expert_files: usize,
-    pub packed_experts: usize,
-    pub peak_buffered_bytes: u64,
-}
+pub type OlmoeConversionOptions = PackedConversionOptions;
+pub type OlmoeConversionReport = PackedConversionReport;
 
 impl OlmoeCheckpoint {
     /// Converts a validated Hugging Face checkpoint into a self-contained,
@@ -100,9 +56,9 @@ impl OlmoeCheckpoint {
 
         let source_store = WeightStore::open(self.root(), limits)?;
         let mut peak_buffered_bytes = 0_u64;
-        let dense_files = convert_dense(
+        let dense_files = convert_dense_tensors(
             &source_store,
-            self.config(),
+            &dense_tensor_names(self.config()),
             &dense_root,
             options.max_buffer_bytes,
             &mut peak_buffered_bytes,
@@ -180,27 +136,6 @@ impl OlmoeCheckpoint {
     }
 }
 
-fn convert_dense(
-    source: &WeightStore,
-    config: &crate::olmoe::OlmoeConfig,
-    destination: &Path,
-    max_buffer_bytes: u64,
-    peak_buffered_bytes: &mut u64,
-) -> Result<Vec<String>> {
-    let names = dense_tensor_names(config);
-    let mut files = Vec::with_capacity(names.len());
-    for (index, name) in names.iter().enumerate() {
-        let descriptor = descriptor(source, name)?;
-        ensure_buffer_bound(descriptor.bytes, max_buffer_bytes, "dense tensor")?;
-        *peak_buffered_bytes = (*peak_buffered_bytes).max(descriptor.bytes);
-        let read = source.read_tensor_bytes(name)?;
-        let file = format!("dense-{index:05}.safetensors");
-        write_raw_tensor(destination.join(&file), name, descriptor, &read)?;
-        files.push(file);
-    }
-    Ok(files)
-}
-
 fn convert_experts(
     source: &WeightStore,
     config: &crate::olmoe::OlmoeConfig,
@@ -226,13 +161,13 @@ fn convert_experts(
                 let gate_descriptor = descriptor(source, &gate_name)?;
                 let up_descriptor = descriptor(source, &up_name)?;
                 let down_descriptor = descriptor(source, &down_name)?;
-                validate_expert_descriptor(
+                validate_matrix_descriptor(
                     gate_descriptor,
                     moe.intermediate_size,
                     moe.hidden_size,
                 )?;
-                validate_expert_descriptor(up_descriptor, moe.intermediate_size, moe.hidden_size)?;
-                validate_expert_descriptor(
+                validate_matrix_descriptor(up_descriptor, moe.intermediate_size, moe.hidden_size)?;
+                validate_matrix_descriptor(
                     down_descriptor,
                     moe.hidden_size,
                     moe.intermediate_size,
@@ -313,95 +248,4 @@ fn convert_experts(
         MoeError::InvalidConfig("OLMoE checkpoint contains no experts".to_string())
     })?;
     Ok((files, scalar_type))
-}
-
-fn write_raw_tensor(
-    path: PathBuf,
-    name: &str,
-    descriptor: &TensorDescriptor,
-    read: &TensorRead,
-) -> Result<()> {
-    let view = TensorView::new(
-        safetensor_dtype(&descriptor.dtype)?,
-        descriptor.shape.clone(),
-        read.bytes(),
-    )?;
-    serialize_to_file([(name, view)], None, &path)?;
-    Ok(())
-}
-
-fn write_packed_records(path: PathBuf, records: &[(String, Vec<u8>)]) -> Result<()> {
-    let views = records
-        .iter()
-        .map(|(name, bytes)| {
-            TensorView::new(Dtype::U8, vec![bytes.len()], bytes.as_slice())
-                .map(|view| (name.as_str(), view))
-        })
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    serialize_to_file(views, None, &path)?;
-    Ok(())
-}
-
-fn descriptor<'a>(store: &'a WeightStore, name: &str) -> Result<&'a TensorDescriptor> {
-    store.descriptor(name).ok_or_else(|| {
-        MoeError::InvalidTensor(format!("source checkpoint is missing tensor '{name}'"))
-    })
-}
-
-fn validate_expert_descriptor(
-    descriptor: &TensorDescriptor,
-    rows: usize,
-    columns: usize,
-) -> Result<()> {
-    if descriptor.shape != [rows, columns] {
-        return Err(MoeError::InvalidTensor(format!(
-            "expert tensor '{}' must have shape [{rows}, {columns}], found {:?}",
-            descriptor.name, descriptor.shape
-        )));
-    }
-    packed_scalar(descriptor)?;
-    Ok(())
-}
-
-fn packed_scalar(descriptor: &TensorDescriptor) -> Result<PackedScalarType> {
-    match descriptor.dtype.as_str() {
-        "f32" => Ok(PackedScalarType::F32),
-        "bf16" => Ok(PackedScalarType::Bf16),
-        dtype => Err(MoeError::InvalidTensor(format!(
-            "expert tensor '{}' uses unsupported dtype '{dtype}'",
-            descriptor.name
-        ))),
-    }
-}
-
-fn safetensor_dtype(dtype: &str) -> Result<Dtype> {
-    match dtype {
-        "f32" => Ok(Dtype::F32),
-        "bf16" => Ok(Dtype::BF16),
-        dtype => Err(MoeError::InvalidTensor(format!(
-            "dense tensor uses unsupported dtype '{dtype}'"
-        ))),
-    }
-}
-
-fn ensure_buffer_bound(bytes: u64, maximum: u64, label: &str) -> Result<()> {
-    if bytes > maximum {
-        return Err(MoeError::InvalidConfig(format!(
-            "{label} conversion requires {bytes} buffered bytes, exceeding max_buffer_bytes {maximum}"
-        )));
-    }
-    Ok(())
-}
-
-fn absolute_destination(destination: &Path) -> Result<PathBuf> {
-    if destination.as_os_str().is_empty() {
-        return Err(MoeError::InvalidConfig(
-            "packed checkpoint destination must not be empty".to_string(),
-        ));
-    }
-    if destination.is_absolute() {
-        Ok(destination.to_path_buf())
-    } else {
-        Ok(std::env::current_dir()?.join(destination))
-    }
 }

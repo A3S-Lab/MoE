@@ -4,6 +4,9 @@ use a3s_moe::olmoe::{OlmoeConfig, OlmoeCpuModel};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 
+#[allow(dead_code)]
+pub mod qwen;
+
 pub fn tiny_config() -> OlmoeConfig {
     OlmoeConfig {
         model_type: "olmoe".to_string(),

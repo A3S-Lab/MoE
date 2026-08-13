@@ -103,6 +103,13 @@ pub(super) fn required_tensor_names(config: &Qwen3MoeConfig) -> Vec<String> {
     names
 }
 
+pub(super) fn dense_tensor_names(config: &Qwen3MoeConfig) -> Vec<String> {
+    required_tensor_names(config)
+        .into_iter()
+        .filter(|name| !name.contains(".mlp.experts."))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
