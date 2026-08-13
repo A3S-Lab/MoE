@@ -1,0 +1,28 @@
+{
+  "schema": "a3s.moe.olmoe-validation.v1",
+  "modelId": "allenai/OLMoE-1B-7B-0924",
+  "modelRevision": "6d84c48581ece794365f2b8e9cfb043c68ade9c5",
+  "promptTokens": 3,
+  "vocabularySize": 50304,
+  "layers": 16,
+  "experts": 64,
+  "routesChecked": 384,
+  "logits": {
+    "tolerance": 0.02,
+    "maxAbsDiff": 0.0009915829,
+    "mismatchCount": 0
+  },
+  "routerLogits": {
+    "tolerance": 0.02,
+    "maxAbsDiff": 0.00011062622,
+    "mismatchCount": 0
+  },
+  "routeWeights": {
+    "tolerance": 0.0002,
+    "maxAbsDiff": 0.000007480383,
+    "mismatchCount": 0
+  },
+  "routeExpertMismatches": 0,
+  "argmaxTokenMismatches": 0,
+  "status": "passed"
+}

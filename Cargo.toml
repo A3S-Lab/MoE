@@ -45,7 +45,7 @@ path = "src/bin/a3s-moe-validate.rs"
 required-features = ["validation"]
 
 [dependencies]
-a3s-power = { git = "https://github.com/A3S-Lab/Power.git", rev = "619c86b", default-features = false, features = ["embedded-inference"] }
+a3s-power = { git = "https://github.com/A3S-Lab/Power.git", rev = "3f348a5", default-features = false, features = ["embedded-inference"] }
 anyhow = { version = "1", optional = true }
 async-trait = { version = "0.1", optional = true }
 candle-core = { version = "0.10.2", default-features = false }

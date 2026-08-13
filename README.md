@@ -74,16 +74,19 @@ foundation are implemented and tested:
 - A dependency-free full Qwen3-MoE decoder oracle covering logits, router
   logits, exact routes, dense-to-sparse layer transitions, prefill/decode
   parity, and sliding attention over the shared Power routing boundary.
+- Strict Qwen3-MoE Hugging Face shard-index validation, exact mixed
+  dense/sparse tensor inventories, resident checkpoint loading, and the shared
+  vocabulary-bounded tokenizer/stream decoder.
 
 The HTTP transport, OpenAI response framing, authentication, rate limiting,
 metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
-resident in the current CPU path. The 13.8 GB public checkpoint's metadata
-contract is verified without downloading weight payloads; a full
-real-checkpoint conversion, numerical run, and representative performance
-artifact remain acceptance items. The published OLMoE checkpoint is a base
+resident in the current CPU path. The complete pinned 13.8 GB public
+checkpoint has passed Transformers-to-Rust numerical validation, bounded
+conversion, Power-streamed generation, resident token-parity comparison, and
+real HTTP completion/SSE smoke tests. The published OLMoE checkpoint is a base
 model and does not declare a chat template, so the server uses an explicit
 generic transcript unless `--chat-template` is supplied for a compatible
-fine-tune.
+fine-tune. Checked raw evidence lives under [`evidence/`](evidence/).
 
 ## Architecture Boundary
 
@@ -259,11 +262,12 @@ python tools/generate_qwen3_moe_oracle.py
 python tools/generate_qwen3_moe_full_oracle.py
 ```
 
-M7 now provides resident CPU reference inference for the second family and
-reuses Power's model-neutral `RoutedExpertBatch`. Fused-checkpoint conversion,
-Power-backed expert streaming, tokenizer integration, service composition, and
-pinned public-checkpoint acceptance remain pending; Qwen3-MoE is therefore not
-yet advertised as a production streaming backend.
+M7 now provides resident CPU reference inference, strict Hugging Face
+checkpoint loading, and tokenizer integration for the second family while
+reusing Power's model-neutral `RoutedExpertBatch`. Fused-checkpoint conversion,
+Power-backed expert streaming, service composition, and pinned public-model
+acceptance remain pending; Qwen3-MoE is therefore not yet advertised as a
+production streaming backend.
 
 ## License
 

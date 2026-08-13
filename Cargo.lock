@@ -45,7 +45,7 @@ dependencies = [
 [[package]]
 name = "a3s-power"
 version = "0.8.0"
-source = "git+https://github.com/A3S-Lab/Power.git?rev=619c86b#619c86ba896d38c25acb556021ef7fa50f361ece"
+source = "git+https://github.com/A3S-Lab/Power.git?rev=3f348a5#3f348a57d2f646748757572b73cf2e3adc021a37"
 dependencies = [
  "a3s-acl",
  "a3s-runtime",

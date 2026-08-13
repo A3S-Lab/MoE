@@ -288,7 +288,7 @@ async fn main() -> Result<()> {
         implementation: ImplementationEvidence {
             crate_name: env!("CARGO_PKG_NAME"),
             crate_version: env!("CARGO_PKG_VERSION"),
-            power_revision: "f1ec432",
+            power_revision: env!("A3S_POWER_REVISION"),
             execution: "f32-dense-power-streamed-experts",
         },
         model: ModelEvidence {

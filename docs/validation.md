@@ -9,7 +9,7 @@
 - OLMoE-1B-7B-0924 checkpoint:
   `6d84c48581ece794365f2b8e9cfb043c68ade9c5`
 - A3S Power composition, process-local manifest, and packed-record contract:
-  `619c86b`
+  `3f348a5`
 
 ## Numerical Gates
 
@@ -130,12 +130,17 @@ remains an M6 acceptance item on a confidential-computing host.
 - Full prefill matches token-at-a-time KV-cache decode for both unrestricted
   causal attention and a two-token sliding window. Cache-limit failures leave
   the caller's transactional state unchanged.
+- The Hugging Face loader requires the exact 531-tensor published inventory,
+  validates each shard as a regular path-safe file, checks index-to-shard
+  ownership while loading, and handles mixed dense/sparse MLP names without
+  duplicating OLMoE's security boundary.
 - The Qwen3-MoE sparse result is expressed directly as Power's unchanged
   `RoutedExpertBatch`; no model-specific Power type or cache was added.
 
-These gates accept the resident CPU reference backend. They do not yet accept
-Qwen3-MoE checkpoint conversion, Power-backed expert streaming, service
-composition, or a public 30B-A3B checkpoint run.
+These gates accept the resident CPU reference backend, source checkpoint
+loader, and tokenizer boundary. They do not yet accept Qwen3-MoE packed
+conversion, Power-backed expert streaming, service composition, or a public
+30B-A3B checkpoint run.
 
 The benchmark's first generation is application-cold with respect to Power's
 expert cache. Integrity verification may already populate the operating-system
@@ -157,8 +162,15 @@ three SafeTensor headers. On 2026-08-13 it reported:
 ```
 
 Every tensor name, index-to-shard mapping, dtype, and shape matched the
-architecture contract. This metadata check does not claim real-weight
-numerical parity; that requires downloading and executing the full checkpoint.
+architecture contract. The complete pinned payload was subsequently
+downloaded and SHA-256 verified. The exact Transformers oracle and independent
+Rust resident run produced [`olmoe-public-validation.json`](../evidence/olmoe-public-validation.json):
+
+- 384 selected routes checked with zero expert-ID mismatches;
+- zero argmax mismatches;
+- maximum absolute differences of `9.915829e-4` for logits,
+  `1.1062622e-4` for router logits, and `7.480383e-6` for route weights;
+- zero values outside the declared acceptance tolerances.
 
 ## Tokenizer
 

@@ -69,3 +69,15 @@ hardware, build profile, cache policy, and page-cache preparation are
 equivalent. `packedCheckpoint` is a caller-provided path-free label (or the
 checkpoint directory name by default); the logical weights digest is the
 machine-independent identity.
+
+## Checked Public CPU Run
+
+[`olmoe-public-cpu-windows.json`](../evidence/olmoe-public-cpu-windows.json)
+records a complete OLMoE-1B-7B run on a 20-logical-core Windows x86-64 host.
+The prompt `Bitcoin is` generated eight identical token IDs on the
+Power-streamed and isolated resident paths. With a 4 GiB expert cache, the
+three warm streaming samples averaged `0.3524 tokens/s` and `5.91 s` TTFT.
+Peak RSS was 13,612,077,056 bytes for streaming versus 41,563,848,704 bytes for
+the resident baseline (about 3.05 times lower), while the resident path was
+about 6.94 times faster for this CPU-only sample. The OS page cache was
+uncontrolled, so the artifact makes no physical-cold-storage claim.

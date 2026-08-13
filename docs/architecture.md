@@ -135,8 +135,10 @@ milestones reuse the same oracle for batched, streaming, and accelerator paths.
 - Implemented: integrity-bound public-oracle generation and a fail-closed
   resident Rust validator for full logits, router logits, routes, and tokenizer
   IDs.
-- Pending acceptance: run the complete 13.8 GB pinned public checkpoint against
-  Transformers token IDs and logits on a sufficiently provisioned host.
+- Accepted on the checked CPU host: the complete 13.8 GB pinned public
+  checkpoint matches Transformers token IDs, all logits/router logits within
+  declared tolerances, every selected expert, all route weights, and every
+  argmax. The raw report is checked under `evidence/`.
 
 ### M2: Streaming Residency
 
@@ -183,9 +185,11 @@ milestones reuse the same oracle for batched, streaming, and accelerator paths.
 - Implemented: a JSON evidence harness measures application-cold and warm
   throughput, TTFT, expert storage bytes, cache telemetry, and process peak RSS.
   The resident CPU baseline runs in a separate child process.
-- Pending acceptance: check in representative evidence from the complete
-  pinned public checkpoint. The harness explicitly does not claim physical
-  cold I/O when the operating-system page cache is uncontrolled.
+- Accepted on the checked CPU host: complete-checkpoint conversion, Power
+  streaming, real HTTP completion/SSE, eight-token resident parity, and raw
+  first/warm performance evidence are checked under `evidence/`. The artifact
+  explicitly does not claim physical cold I/O because the operating-system
+  page cache was uncontrolled.
 
 The official base OLMoE tokenizer configuration declares no chat template.
 The service therefore uses a deterministic generic role transcript by default
@@ -214,10 +218,12 @@ fine-tune. It does not present the base model as instruction-tuned.
   tensors, canonical reduction, transactional shared KV cache, and greedy
   generation. A dependency-free full-decoder fixture validates logits, router
   logits, and unchanged Power `RoutedExpertBatch` routes across dense and
-  sparse layers.
+  sparse layers. The second family also reuses a single hardened SafeTensor
+  shard-index loader and vocabulary-bounded tokenizer while supplying its own
+  exact mixed dense/sparse tensor inventory.
 - M7 pending implementation: add fused-checkpoint conversion, Power-backed
-  expert streaming, tokenizer and service adapters, plus pinned public-model
-  numerical and performance acceptance.
+  expert streaming and service composition, plus pinned public-model numerical
+  and performance acceptance.
 
 ## Acceptance Gates
 
