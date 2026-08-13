@@ -3,7 +3,9 @@
 mod backend;
 mod config;
 mod device;
+mod load;
 mod request;
+mod source;
 mod stream;
 mod worker;
 

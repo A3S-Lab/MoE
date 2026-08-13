@@ -43,3 +43,6 @@ All notable changes to this project are documented in this file.
 - Typed CPU, CUDA, Metal, and automatic device selection for the Power service
   and benchmark, including device-tier expert staging and explicit automatic
   CPU fallback evidence.
+- Pinned-manifest, seekable AES-256-GCM packed checkpoints with bounded
+  decrypted chunks, zeroizing typed keys, an environment-key encryption CLI,
+  and encrypted Power service loading without plaintext weight intermediates.

@@ -69,6 +69,28 @@ only after both collections have been reopened and their digests recorded.
 Only `WeightHierarchy` owns resident bytes. Model code may hold short-lived
 views for the current operation but cannot retain a parallel byte cache.
 
+### Confidential checkpoint representation
+
+The confidential form encrypts both packed collections with Power's seekable
+AES-256-GCM container. Every chunk has an independent random nonce and binds
+the file header plus chunk index as authenticated data. Power first performs a
+complete bounded-chunk authentication pass that reconstructs each logical
+collection digest; later tensor ranges decrypt only their covering chunks into
+zeroizing buffers. No decrypted SafeTensor collection is written to disk.
+
+An OLMoE-owned `confidential.json` binds the logical packed-weight digest,
+plaintext collection digests, Power child-manifest digests, `config.json`, the
+packed manifest, and the optional tokenizer. Callers must provide the top
+manifest SHA-256 out of band through `OlmoeEncryptedCheckpointSource`; replacing
+the checkpoint directory alone cannot replace that trust anchor. The same
+Power `WeightHierarchy` then stages encrypted expert records, so confidential
+loading does not introduce a model-owned cache.
+
+Remote attestation and policy-controlled key release belong to the deployment
+environment. The library accepts a zeroizing typed key owner; the CLI can load
+one from an environment variable without placing key bytes in arguments or
+logs.
+
 ## Execution Flow
 
 ```text
@@ -178,7 +200,13 @@ fine-tune. It does not present the base model as instruction-tuned.
   exposes content-free CPU fallback evidence.
 - M5 pending acceptance: run CUDA and Metal parity against the public oracle
   on matching hardware and check in dtype-specific evidence.
-- Add seekable encrypted expert reads and TEE memory acceptance.
+- M6 implemented foundation: bounded-chunk encryption and authenticated random
+  access cover dense and expert collections; a pinned top manifest binds all
+  plaintext metadata; the typed service source reuses Power residency without
+  decrypted intermediates; wrong keys, replacement, tampering, cancellation,
+  memory bounds, numerical parity, and service generation are tested.
+- M6 pending acceptance: integrate an attested key-release provider and record
+  peak-memory and inference evidence on a real confidential-computing host.
 - Add a second MoE family without changing Power's model-neutral contracts.
 
 ## Acceptance Gates

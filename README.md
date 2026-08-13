@@ -14,7 +14,8 @@ active parameters.
 ## Current Status
 
 The M0 numerical contract, resident M1 CPU engine, bounded M2 expert streaming,
-M3 continuous batching path, and M4 service path are implemented and tested:
+M3 continuous batching path, M4 service path, and M6 encrypted-weight
+foundation are implemented and tested:
 
 - Hugging Face compatible OLMoE configuration parsing and strict geometry
   validation.
@@ -61,6 +62,11 @@ M3 continuous batching path, and M4 service path are implemented and tested:
   plus a JSON benchmark that records application-cold and warm generation,
   TTFT, expert bytes read, cache state, peak RSS, and an isolated resident CPU
   baseline.
+- Independently authenticated, seekable AES-256-GCM dense and expert
+  collections, bound together with plaintext metadata by a pinned checkpoint
+  manifest and consumed through the same Power residency hierarchy.
+- An `a3s-moe-encrypt` CLI and typed encrypted service source that keep keys out
+  of arguments, logs, model manifests, and decrypted intermediate files.
 
 The HTTP transport, OpenAI response framing, authentication, rate limiting,
 metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
@@ -138,6 +144,22 @@ The destination is created only after conversion and digest validation
 complete. The command refuses to overwrite an existing destination and emits a
 JSON conversion report containing the observed peak buffered bytes.
 
+Encrypt a packed checkpoint with a key supplied by the process environment:
+
+```shell
+export A3S_MOE_WEIGHT_KEY="$(openssl rand -hex 32)"
+cargo run --release --bin a3s-moe-encrypt -- \
+  /models/OLMoE-1B-7B-0924-a3s /models/OLMoE-1B-7B-0924-a3s-encrypted \
+  --key-env A3S_MOE_WEIGHT_KEY --chunk-mib 1 \
+  > olmoe-encryption.json
+```
+
+Store the emitted `manifestSha256` as the checkpoint's out-of-band trust
+anchor. Dense and expert weights are encrypted; `config.json`, `manifest.json`,
+and the optional tokenizer remain plaintext but are SHA-256-bound by that
+trusted manifest. Encryption and opening use bounded chunks and never publish
+decrypted intermediate files.
+
 Serve the packed checkpoint through Power's OpenAI-compatible API:
 
 ```shell
@@ -153,6 +175,21 @@ backend and a process-local manifest. Supported sampling controls are
 `repeat_last_n`, `frequency_penalty`, and `presence_penalty`. Unsupported
 modalities, tools, structured output, cross-request KV sessions, and backend
 knobs fail before inference.
+
+Serve the encrypted form by supplying both its pinned trust anchor and the
+environment variable that owns the key:
+
+```shell
+cargo run --release --features server --bin a3s-moe-server -- \
+  /models/OLMoE-1B-7B-0924-a3s-encrypted --model olmoe-1b-7b \
+  --encrypted-manifest-sha256 <manifestSha256> \
+  --encrypted-key-env A3S_MOE_WEIGHT_KEY
+```
+
+Production confidential hosts should construct the typed encrypted source
+from their attested key-release mechanism. The environment-based CLI is an
+operator boundary that avoids command-line key exposure; it is not itself a
+remote-attestation protocol.
 
 The same graph can run on a Power-resolved accelerator. Build exactly one
 platform feature and select a typed device explicitly:

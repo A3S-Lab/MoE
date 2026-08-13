@@ -17,7 +17,9 @@ pub use cpu::{OlmoeCpuModel, OlmoeForwardOutput, OlmoeKvCache};
 pub use expert::OlmoeExpertWeights;
 pub use layer::{OlmoeMoeLayer, OlmoeMoeOutput};
 pub use packed_checkpoint::{
-    OlmoeConversionOptions, OlmoeConversionReport, OlmoePackedCheckpoint, OlmoePackedManifest,
+    OlmoeConversionOptions, OlmoeConversionReport, OlmoeEncryptedCheckpointSource,
+    OlmoeEncryptedPackedManifest, OlmoePackedCheckpoint, OlmoePackedEncryptionReport,
+    OlmoePackedManifest, OLMOE_ENCRYPTED_PACKED_MANIFEST_SCHEMA,
 };
 pub use router::{OlmoeRouter, OlmoeRouterOutput};
 pub use sampling::{OlmoeSampler, OlmoeSamplingConfig};

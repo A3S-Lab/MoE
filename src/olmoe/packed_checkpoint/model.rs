@@ -36,22 +36,7 @@ pub struct OlmoePackedCheckpoint {
 
 impl OlmoePackedCheckpoint {
     pub fn open(root: impl AsRef<Path>, runtime: EmbeddedRuntime) -> Result<Self> {
-        let root = root.as_ref().canonicalize()?;
-        if !root.is_dir() {
-            return Err(MoeError::InvalidConfig(format!(
-                "packed checkpoint root '{}' is not a directory",
-                root.display()
-            )));
-        }
-        let config_path = root.join(CONFIG_FILE);
-        enforce_metadata_limit(&config_path, MAX_CONFIG_BYTES, "packed OLMoE config")?;
-        let config = OlmoeConfig::from_json_path(&config_path)?;
-        let manifest_path = root.join(MANIFEST_FILE);
-        enforce_metadata_limit(&manifest_path, MAX_MANIFEST_BYTES, "packed OLMoE manifest")?;
-        let manifest: OlmoePackedManifest =
-            serde_json::from_slice(&std::fs::read(&manifest_path)?)?;
-        validate_manifest(&manifest, &config, &root)?;
-
+        let (root, config, manifest) = read_metadata(root.as_ref())?;
         let dense_store = Arc::new(WeightStore::open(
             root.join(DENSE_DIRECTORY),
             runtime.limits(),
@@ -60,6 +45,17 @@ impl OlmoePackedCheckpoint {
             root.join(EXPERT_DIRECTORY),
             runtime.limits(),
         )?);
+        Self::from_stores(root, config, manifest, dense_store, expert_store, runtime)
+    }
+
+    pub(super) fn from_stores(
+        root: PathBuf,
+        config: OlmoeConfig,
+        manifest: OlmoePackedManifest,
+        dense_store: Arc<WeightStore>,
+        expert_store: Arc<WeightStore>,
+        runtime: EmbeddedRuntime,
+    ) -> Result<Self> {
         dense_store
             .verify_integrity("packed OLMoE dense weights", &manifest.dense_weights_sha256)?;
         expert_store.verify_integrity(
@@ -153,6 +149,24 @@ impl OlmoePackedCheckpoint {
         }
         self.load_streaming(policy)
     }
+}
+
+pub(super) fn read_metadata(root: &Path) -> Result<(PathBuf, OlmoeConfig, OlmoePackedManifest)> {
+    let root = root.canonicalize()?;
+    if !root.is_dir() {
+        return Err(MoeError::InvalidConfig(format!(
+            "packed checkpoint root '{}' is not a directory",
+            root.display()
+        )));
+    }
+    let config_path = root.join(CONFIG_FILE);
+    enforce_metadata_limit(&config_path, MAX_CONFIG_BYTES, "packed OLMoE config")?;
+    let config = OlmoeConfig::from_json_path(&config_path)?;
+    let manifest_path = root.join(MANIFEST_FILE);
+    enforce_metadata_limit(&manifest_path, MAX_MANIFEST_BYTES, "packed OLMoE manifest")?;
+    let manifest: OlmoePackedManifest = serde_json::from_slice(&std::fs::read(&manifest_path)?)?;
+    validate_manifest(&manifest, &config, &root)?;
+    Ok((root, config, manifest))
 }
 
 impl std::fmt::Debug for OlmoePackedCheckpoint {

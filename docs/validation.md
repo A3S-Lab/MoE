@@ -9,7 +9,7 @@
 - OLMoE-1B-7B-0924 checkpoint:
   `6d84c48581ece794365f2b8e9cfb043c68ade9c5`
 - A3S Power composition, process-local manifest, and packed-record contract:
-  `f1ec432`
+  `619c86b`
 
 ## Numerical Gates
 
@@ -91,6 +91,26 @@ from evidence rather than guessed.
 - The benchmark regression validates the versioned JSON schema, TTFT,
   generated-token count, expert bytes read, cache-state labels, process peak
   RSS, and token parity with an isolated resident CPU child process.
+
+## Encrypted Checkpoint Gates
+
+- Dense and expert collections use independently authenticated seekable Power
+  containers; encrypted output contains no plaintext `.safetensors` files.
+- The pinned top manifest binds both Power child manifests, all logical weight
+  digests, configuration, packed metadata, and the optional tokenizer.
+- Wrong trust anchors, wrong keys, added artifacts, modified ciphertext, and
+  pre-cancelled opens fail before model construction.
+- Conversion never publishes a partial destination and reports a peak
+  plaintext chunk no larger than the configured chunk size.
+- Encrypted and plaintext checkpoints produce the same logits, exact routes,
+  execution binding, and greedy token IDs through the same Power hierarchy.
+- The service accepts an explicit typed encrypted source, reuses it for the
+  process-local Power manifest callback, and rejects an untrusted plain reload
+  of the same model name.
+
+These gates validate the software boundary and bounded decrypted buffers. They
+do not claim remote attestation or hardware-isolated execution; that evidence
+remains an M6 acceptance item on a confidential-computing host.
 
 The benchmark's first generation is application-cold with respect to Power's
 expert cache. Integrity verification may already populate the operating-system

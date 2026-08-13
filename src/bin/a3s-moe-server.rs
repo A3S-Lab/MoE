@@ -2,11 +2,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use a3s_moe::olmoe::OlmoeEncryptedCheckpointSource;
 use a3s_moe::service::{OlmoeBackend, OlmoeBackendConfig, OlmoeDeviceSpec};
 use a3s_power::config::PowerConfig;
-use a3s_power::inference::{InferenceLimits, ResidencyPolicy, TelemetryMode};
+use a3s_power::inference::{InferenceLimits, ResidencyPolicy, SeekableWeightKey, TelemetryMode};
 use a3s_power::server::PowerServerBuilder;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
@@ -35,6 +36,14 @@ struct Args {
     /// Optional Hugging Face compatible Jinja chat template.
     #[arg(long)]
     chat_template: Option<PathBuf>,
+
+    /// Pinned SHA-256 of confidential.json for an encrypted checkpoint.
+    #[arg(long, requires = "encrypted_key_env")]
+    encrypted_manifest_sha256: Option<String>,
+
+    /// Environment variable containing the 64-hex-character encryption key.
+    #[arg(long, requires = "encrypted_manifest_sha256")]
+    encrypted_key_env: Option<String>,
 
     /// Power host-tier expert cache bound in MiB; zero streams every record.
     #[arg(long, default_value_t = 512)]
@@ -132,9 +141,23 @@ async fn main() -> Result<()> {
         ),
         None => None,
     };
-    let manifest = backend
-        .preload(args.model, args.checkpoint, template_override)
-        .await?;
+    let manifest = match (args.encrypted_manifest_sha256, args.encrypted_key_env) {
+        (Some(manifest_sha256), Some(key_environment)) => {
+            let key = SeekableWeightKey::from_env(&key_environment)
+                .context("failed to load encrypted checkpoint key")?;
+            let source = OlmoeEncryptedCheckpointSource::new(args.checkpoint, manifest_sha256, key)
+                .context("invalid encrypted checkpoint source")?;
+            backend
+                .preload_encrypted(args.model, source, template_override)
+                .await?
+        }
+        (None, None) => {
+            backend
+                .preload(args.model, args.checkpoint, template_override)
+                .await?
+        }
+        _ => bail!("--encrypted-manifest-sha256 and --encrypted-key-env must be provided together"),
+    };
     let device = backend.device_selection(&manifest.name)?;
     tracing::info!(
         model = %manifest.name,

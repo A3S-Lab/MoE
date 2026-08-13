@@ -8,7 +8,7 @@
 | M3 Continuous batching | Complete | Route-unioned batches retain single-request parity and load each active expert once per step. |
 | M4 Service and performance | In progress | Service, sampling, streaming, and the evidence harness are complete; a representative public-checkpoint artifact remains. |
 | M5 GPU execution | In progress | Device-native graph and explicit fallback evidence are implemented; CUDA/Metal public-checkpoint parity remains. |
-| M6 TEE | Planned | Seekable encrypted records and confidential execution pass memory, integrity, and cancellation tests. |
+| M6 TEE | In progress | Seekable encrypted records pass bounded-memory, integrity, cancellation, and service tests; attested key release on a real confidential host remains. |
 | M7 Second architecture | Planned | A second MoE family lands without model-specific changes to Power's runtime contracts. |
 
 Detailed ownership and acceptance rules live in

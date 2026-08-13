@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 
@@ -11,19 +11,21 @@ use a3s_power::backend::types::{
 use a3s_power::backend::Backend;
 use a3s_power::error::{PowerError, Result as PowerResult};
 use a3s_power::inference::{EmbeddedRuntime, PlacementTelemetry};
-use a3s_power::model::manifest::{ManifestMessage, ModelFormat, ModelManifest, ModelParameters};
+use a3s_power::model::manifest::{ModelFormat, ModelManifest};
 use a3s_power::server::request_context::RequestContext;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 
-use crate::olmoe::{
-    OlmoeConfig, OlmoePackedCheckpoint, OlmoePackedManifest, OlmoeStreamingModel, OlmoeTokenizer,
-    PackedScalarType,
-};
+use crate::olmoe::{OlmoeEncryptedCheckpointSource, OlmoeStreamingModel, OlmoeTokenizer};
 use crate::{MoeError, Result};
 
 use super::config::{OlmoeBackendConfig, OlmoeDeviceSelection};
+use super::load::{
+    directory_size, model_load_error, power_manifest, validate_model_name, LoadSpec,
+    LoadedArtifacts,
+};
 use super::request::{prepare_chat, prepare_completion, PromptPolicy};
+use super::source::CheckpointSource;
 use super::stream::CancellableStream;
 use super::worker::GenerationWorker;
 
@@ -39,6 +41,7 @@ pub struct OlmoeBackend {
 struct LoadedModel {
     manifest: ModelManifest,
     canonical_path: PathBuf,
+    trust_anchor: Option<String>,
     tokenizer: Arc<OlmoeTokenizer>,
     model: Arc<OlmoeStreamingModel>,
     worker: GenerationWorker,
@@ -49,27 +52,6 @@ impl Drop for LoadedModel {
     fn drop(&mut self) {
         self.worker.shutdown();
     }
-}
-
-struct LoadedArtifacts {
-    canonical_path: PathBuf,
-    config: OlmoeConfig,
-    packed_manifest: OlmoePackedManifest,
-    tokenizer: Arc<OlmoeTokenizer>,
-    model: Arc<OlmoeStreamingModel>,
-    binding: a3s_power::inference::ExecutionBatchBinding,
-    size: u64,
-    device: OlmoeDeviceSelection,
-}
-
-struct LoadSpec {
-    name: String,
-    path: PathBuf,
-    expected_sha256: Option<String>,
-    system_prompt: Option<String>,
-    template_override: Option<String>,
-    default_parameters: Option<HashMap<String, serde_json::Value>>,
-    messages: Vec<ManifestMessage>,
 }
 
 impl OlmoeBackend {
@@ -92,7 +74,27 @@ impl OlmoeBackend {
     ) -> PowerResult<ModelManifest> {
         self.load_spec(LoadSpec {
             name: name.into(),
-            path: path.into(),
+            source: CheckpointSource::Plain(path.into()),
+            expected_sha256: None,
+            system_prompt: None,
+            template_override,
+            default_parameters: None,
+            messages: Vec::new(),
+        })
+        .await
+    }
+
+    /// Load a seekable encrypted packed checkpoint using its out-of-band
+    /// manifest digest and zeroizing key owner.
+    pub async fn preload_encrypted(
+        &self,
+        name: impl Into<String>,
+        source: OlmoeEncryptedCheckpointSource,
+        template_override: Option<String>,
+    ) -> PowerResult<ModelManifest> {
+        self.load_spec(LoadSpec {
+            name: name.into(),
+            source: CheckpointSource::Encrypted(source),
             expected_sha256: None,
             system_prompt: None,
             template_override,
@@ -143,7 +145,7 @@ impl OlmoeBackend {
         let limits = self.config.inference_limits.clone();
         let mut residency = self.config.residency_policy.clone();
         let requested_device = self.config.device;
-        let path = spec.path.clone();
+        let source = spec.source.clone();
         let artifacts = tokio::task::spawn_blocking(move || {
             let runtime = EmbeddedRuntime::new(requested_device, limits)?;
             let device = OlmoeDeviceSelection::new(
@@ -152,7 +154,7 @@ impl OlmoeBackend {
                 residency.device_cache_bytes,
             );
             residency.device_cache_bytes = device.effective_device_cache_bytes;
-            let checkpoint = OlmoePackedCheckpoint::open(path, runtime)?;
+            let checkpoint = source.open(runtime)?;
             let tokenizer = Arc::new(checkpoint.load_tokenizer()?);
             let binding = checkpoint.execution_batch_binding()?;
             let config = checkpoint.config().clone();
@@ -198,6 +200,7 @@ impl OlmoeBackend {
         let loaded = Arc::new(LoadedModel {
             manifest: manifest.clone(),
             canonical_path: artifacts.canonical_path,
+            trust_anchor: spec.source.trust_anchor().map(str::to_owned),
             tokenizer: artifacts.tokenizer,
             model: artifacts.model,
             worker,
@@ -255,7 +258,7 @@ impl Backend for OlmoeBackend {
         }
         self.load_spec(LoadSpec {
             name: manifest.name.clone(),
-            path: manifest.path.clone(),
+            source: CheckpointSource::Plain(manifest.path.clone()),
             expected_sha256: Some(manifest.sha256.clone()),
             system_prompt: manifest.system_prompt.clone(),
             template_override: manifest.template_override.clone(),
@@ -377,51 +380,19 @@ impl Backend for OlmoeBackend {
     }
 }
 
-fn power_manifest(spec: &LoadSpec, artifacts: &LoadedArtifacts) -> ModelManifest {
-    ModelManifest {
-        name: spec.name.clone(),
-        format: ModelFormat::SafeTensors,
-        size: artifacts.size,
-        sha256: artifacts.packed_manifest.weights_sha256(),
-        parameters: Some(ModelParameters {
-            context_length: u32::try_from(artifacts.config.max_position_embeddings).ok(),
-            embedding_length: u32::try_from(artifacts.config.hidden_size).ok(),
-            parameter_count: None,
-            quantization: Some(match artifacts.packed_manifest.scalar_type {
-                PackedScalarType::F32 => "F32".to_string(),
-                PackedScalarType::Bf16 => "BF16".to_string(),
-            }),
-        }),
-        created_at: chrono::Utc::now(),
-        path: artifacts.canonical_path.clone(),
-        system_prompt: spec.system_prompt.clone(),
-        template_override: spec.template_override.clone(),
-        default_parameters: spec.default_parameters.clone(),
-        modelfile_content: None,
-        license: None,
-        adapter_path: None,
-        projector_path: None,
-        messages: spec.messages.clone(),
-        family: Some("olmoe".to_string()),
-        families: None,
-    }
-}
-
-fn validate_model_name(name: &str) -> PowerResult<()> {
-    if name.trim().is_empty() {
-        Err(PowerError::InvalidRequest(
-            "OLMoE model name must not be empty".to_string(),
-        ))
-    } else {
-        Ok(())
-    }
-}
-
 fn validate_existing(loaded: &LoadedModel, spec: &LoadSpec) -> PowerResult<()> {
-    let canonical = spec.path.canonicalize()?;
+    let canonical = spec.source.root().canonicalize()?;
     if canonical != loaded.canonical_path {
         return Err(PowerError::InvalidRequest(format!(
             "model '{}' is already loaded from a different checkpoint",
+            spec.name
+        )));
+    }
+    if spec.expected_sha256.is_none()
+        && loaded.trust_anchor.as_deref() != spec.source.trust_anchor()
+    {
+        return Err(PowerError::InvalidRequest(format!(
+            "model '{}' is already loaded with a different checkpoint trust anchor",
             spec.name
         )));
     }
@@ -454,37 +425,6 @@ fn validate_existing(loaded: &LoadedModel, spec: &LoadSpec) -> PowerResult<()> {
         )));
     }
     Ok(())
-}
-
-fn directory_size(root: &Path) -> Result<u64> {
-    let mut total = 0_u64;
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        for entry in std::fs::read_dir(directory)? {
-            let entry = entry?;
-            let metadata = entry.path().symlink_metadata()?;
-            if metadata.file_type().is_symlink() {
-                return Err(MoeError::InvalidConfig(
-                    "packed checkpoints must not contain symbolic links".to_string(),
-                ));
-            }
-            if metadata.is_dir() {
-                pending.push(entry.path());
-            } else if metadata.is_file() {
-                total = total.checked_add(metadata.len()).ok_or_else(|| {
-                    MoeError::InvalidConfig("packed checkpoint size overflowed u64".to_string())
-                })?;
-            }
-        }
-    }
-    Ok(total)
-}
-
-fn model_load_error(error: MoeError) -> PowerError {
-    match error {
-        MoeError::Power(error) => error,
-        other => PowerError::InferenceFailed(other.to_string()),
-    }
 }
 
 fn read_models(

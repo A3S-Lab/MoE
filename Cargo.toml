@@ -12,7 +12,7 @@ categories = ["science"]
 
 [features]
 default = []
-validation = ["dep:sha2"]
+validation = []
 cuda = ["a3s-power/embedded-cuda"]
 metal = ["a3s-power/embedded-metal"]
 server = [
@@ -45,7 +45,7 @@ path = "src/bin/a3s-moe-validate.rs"
 required-features = ["validation"]
 
 [dependencies]
-a3s-power = { git = "https://github.com/A3S-Lab/Power.git", rev = "f1ec432", default-features = false, features = ["embedded-inference"] }
+a3s-power = { git = "https://github.com/A3S-Lab/Power.git", rev = "619c86b", default-features = false, features = ["embedded-inference"] }
 anyhow = { version = "1", optional = true }
 async-trait = { version = "0.1", optional = true }
 candle-core = { version = "0.10.2", default-features = false }
@@ -57,7 +57,7 @@ libc = { version = "0.2", optional = true }
 safetensors = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = { version = "0.10", optional = true }
+sha2 = "0.10"
 tempfile = "3"
 thiserror = "1"
 tokenizers = "0.22.2"

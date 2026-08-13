@@ -3,10 +3,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use a3s_moe::olmoe::{OlmoeEncryptedCheckpointSource, OlmoePackedCheckpoint};
 use a3s_moe::service::{OlmoeBackend, OlmoeBackendConfig};
 use a3s_power::backend::types::{ChatRequest, CompletionRequest};
 use a3s_power::backend::Backend;
-use a3s_power::inference::{DevicePreference, InferenceLimits, ResidencyPolicy, TelemetryMode};
+use a3s_power::inference::{
+    DevicePreference, EmbeddedRuntime, InferenceLimits, ResidencyPolicy, SeekableWeightKey,
+    TelemetryMode,
+};
 use futures::StreamExt;
 
 #[path = "support/packed.rs"]
@@ -139,6 +143,44 @@ async fn auto_device_records_an_explicit_cpu_fallback_when_no_accelerator_is_ava
     assert_eq!(selection.resolved.name(), "cpu");
     assert!(selection.automatic_cpu_fallback);
     assert_eq!(selection.effective_device_cache_bytes, 0);
+}
+
+#[tokio::test]
+async fn backend_preloads_an_encrypted_checkpoint_from_a_typed_trust_source() {
+    let directory = tempfile::tempdir().unwrap();
+    let packed = write_packed(directory.path());
+    let encrypted = directory.path().join("encrypted");
+    let config = backend_config();
+    let runtime =
+        EmbeddedRuntime::new(DevicePreference::Cpu, config.inference_limits.clone()).unwrap();
+    let checkpoint = OlmoePackedCheckpoint::open(&packed, runtime).unwrap();
+    let expected_weights = checkpoint.manifest().weights_sha256();
+    let key = SeekableWeightKey::new([0x7d; 32]);
+    let report = checkpoint
+        .encrypt_to_seekable(&encrypted, &key, 4 * 1024, &config.inference_limits)
+        .unwrap();
+    let source =
+        OlmoeEncryptedCheckpointSource::new(&encrypted, report.manifest_sha256, key).unwrap();
+    let backend = OlmoeBackend::new(config).unwrap();
+
+    let manifest = backend
+        .preload_encrypted("encrypted-olmoe", source, None)
+        .await
+        .unwrap();
+    assert_eq!(manifest.sha256, expected_weights);
+    backend.load(&manifest).await.unwrap();
+    let chunks = successful(
+        backend
+            .complete("encrypted-olmoe", completion("hello", 1))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(chunks.last().unwrap().done);
+    assert!(backend
+        .preload("encrypted-olmoe", encrypted, None)
+        .await
+        .is_err());
 }
 
 #[test]
