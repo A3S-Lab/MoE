@@ -157,6 +157,10 @@ remains an M6 acceptance item on a confidential-computing host.
   possible one-expert files under explicit 64 GiB / 8,192-file hard limits. A
   geometry-only unit test proves the generic Power defaults are too small and
   the selected profile is sufficient without allocating weights.
+- Its entrypoint residency profile covers a complete 128-expert layer union in
+  lossless F32 form under a 4 GiB batch limit while retaining a separate 512
+  MiB concurrent-read window. A geometry-only test proves the generic 1 GiB
+  batch default is insufficient for that valid public-model case.
 - Mixed-layer streaming F32 logits, router logits, and exact routes match the
   resident backend within `2e-5`; a BF16 packed checkpoint produces identical
   greedy token IDs while using one bounded Power host cache.

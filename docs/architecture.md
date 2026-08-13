@@ -36,6 +36,13 @@ bounded family profile: Qwen3-MoE raises only `max_model_bytes` to 64 GiB and
 select that profile after bounded architecture detection. Library callers keep
 full control of supplied limits; model loading never silently widens them.
 
+The entrypoints likewise select an architecture-owned residency default.
+Qwen3-MoE permits at most 128 weights and 4 GiB in one exact current-layer
+staging batch, enough for a full 128-expert union in lossless F32 form. This is
+separate from its four-worker, 512 MiB concurrent-read window and from the
+operator-selected host/device cache sizes. Power's generic residency defaults
+remain unchanged, and explicitly supplied library policies are not widened.
+
 ## Numerical Invariants
 
 OLMoE inference follows the reference order:

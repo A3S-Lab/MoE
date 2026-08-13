@@ -26,6 +26,7 @@ impl OlmoeBackendConfig {
         inference_limits.max_queued_requests = 64;
         Self {
             inference_limits,
+            residency_policy: architecture.residency_policy(),
             ..Self::default()
         }
     }

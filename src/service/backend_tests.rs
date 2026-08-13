@@ -1,5 +1,7 @@
 use a3s_power::backend::Backend;
 
+use crate::MoeArchitecture;
+
 use super::*;
 
 #[test]
@@ -21,4 +23,17 @@ fn backends_are_send_and_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<OlmoeBackend>();
     assert_send_sync::<Qwen3MoeBackend>();
+}
+
+#[test]
+fn architecture_config_factory_selects_the_family_residency_profile() {
+    for architecture in [MoeArchitecture::Olmoe, MoeArchitecture::Qwen3Moe] {
+        let config = OlmoeBackendConfig::for_architecture(architecture);
+        let mut expected_limits = architecture.inference_limits();
+        expected_limits.max_concurrent_requests = 4;
+        expected_limits.max_queued_requests = 64;
+        assert_eq!(config.inference_limits, expected_limits);
+        assert_eq!(config.residency_policy, architecture.residency_policy());
+        config.validate().unwrap();
+    }
 }

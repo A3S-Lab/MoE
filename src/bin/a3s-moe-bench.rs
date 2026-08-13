@@ -155,9 +155,8 @@ async fn main() -> Result<()> {
             residency_policy: ResidencyPolicy {
                 host_cache_bytes,
                 device_cache_bytes,
-                max_background_inflight_bytes: 512 * 1024 * 1024,
                 telemetry: TelemetryMode::Aggregate,
-                ..ResidencyPolicy::default()
+                ..architecture.residency_policy()
             },
             stream_capacity: 8,
             batch_window: Duration::ZERO,

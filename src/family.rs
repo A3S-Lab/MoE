@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 use std::path::Path;
 
-use a3s_power::inference::InferenceLimits;
+use a3s_power::inference::{InferenceLimits, ResidencyPolicy};
 use serde::{Deserialize, Serialize};
 
 use crate::{MoeError, Result};
@@ -13,6 +13,9 @@ const GIB: u64 = 1024 * 1024 * 1024;
 const QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES: u64 = 61_066_575_648;
 const QWEN3_MOE_MAX_MODEL_FILES: usize = 8_192;
 const QWEN3_MOE_MAX_MODEL_BYTES: u64 = 64 * GIB;
+const QWEN3_MOE_MAX_STAGED_WEIGHTS: usize = 128;
+const QWEN3_MOE_MAX_STAGED_BYTES: u64 = 4 * GIB;
+const QWEN3_MOE_MAX_INFLIGHT_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Model architecture implemented by this crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +101,28 @@ impl MoeArchitecture {
         }
         limits
     }
+
+    /// Bounded default expert-residency policy for this architecture.
+    ///
+    /// Entrypoints use this profile before applying operator-selected cache
+    /// sizes. Library callers retain full control over an explicitly supplied
+    /// policy; checkpoint loading never widens it.
+    pub fn residency_policy(self) -> ResidencyPolicy {
+        let mut policy = ResidencyPolicy::default();
+        match self {
+            Self::Olmoe => {}
+            Self::Qwen3Moe => {
+                // One public Qwen3-MoE layer can route to all 128 experts
+                // across a prefill or continuous batch. The batch limit must
+                // cover their lossless F32 form, while the independent
+                // in-flight window keeps concurrent reads bounded.
+                policy.max_prefetch_items = QWEN3_MOE_MAX_STAGED_WEIGHTS;
+                policy.max_prefetch_bytes = QWEN3_MOE_MAX_STAGED_BYTES;
+                policy.max_background_inflight_bytes = QWEN3_MOE_MAX_INFLIGHT_BYTES;
+            }
+        }
+        policy
+    }
 }
 
 impl Display for MoeArchitecture {
@@ -145,6 +170,30 @@ mod tests {
         assert!(qwen.max_model_bytes >= QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES);
         assert!(qwen.max_model_files >= 48 * 128);
         assert_eq!(MoeArchitecture::Olmoe.inference_limits(), power_default);
+        qwen.validate().unwrap();
+    }
+
+    #[test]
+    fn public_qwen_residency_profile_covers_a_full_f32_expert_union() {
+        const HIDDEN_SIZE: u64 = 2_048;
+        const EXPERT_INTERMEDIATE_SIZE: u64 = 768;
+        const EXPERTS: u64 = 128;
+        const BF16_BYTES: u64 = 2;
+        const F32_BYTES: u64 = 4;
+        const EXPERT_ELEMENTS: u64 = 3 * HIDDEN_SIZE * EXPERT_INTERMEDIATE_SIZE;
+        const RECORD_HEADER_BYTES: u64 = crate::PackedExpertRecord::HEADER_BYTES as u64;
+        const PUBLIC_BF16_UNION_BYTES: u64 =
+            EXPERTS * (EXPERT_ELEMENTS * BF16_BYTES + RECORD_HEADER_BYTES);
+        const FULL_F32_UNION_BYTES: u64 =
+            EXPERTS * (EXPERT_ELEMENTS * F32_BYTES + RECORD_HEADER_BYTES);
+
+        let power_default = ResidencyPolicy::default();
+        let qwen = MoeArchitecture::Qwen3Moe.residency_policy();
+        assert!(power_default.max_prefetch_bytes < PUBLIC_BF16_UNION_BYTES);
+        assert!(qwen.max_prefetch_bytes >= FULL_F32_UNION_BYTES);
+        assert!(qwen.max_prefetch_items >= EXPERTS as usize);
+        assert!(qwen.max_background_inflight_bytes < qwen.max_prefetch_bytes);
+        assert_eq!(MoeArchitecture::Olmoe.residency_policy(), power_default);
         qwen.validate().unwrap();
     }
 }

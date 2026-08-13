@@ -26,7 +26,6 @@ pub use schema::{
 };
 
 const DEFAULT_HOST_CACHE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-const DEFAULT_BACKGROUND_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Resource and numerical policy for public Qwen3-MoE validation.
 #[derive(Debug, Clone)]
@@ -43,9 +42,8 @@ impl Default for Qwen3MoeValidationOptions {
             inference_limits: MoeArchitecture::Qwen3Moe.inference_limits(),
             residency_policy: ResidencyPolicy {
                 host_cache_bytes: DEFAULT_HOST_CACHE_BYTES,
-                max_background_inflight_bytes: DEFAULT_BACKGROUND_BYTES,
                 telemetry: TelemetryMode::Aggregate,
-                ..ResidencyPolicy::default()
+                ..MoeArchitecture::Qwen3Moe.residency_policy()
             },
         }
     }

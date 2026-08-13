@@ -127,9 +127,8 @@ async fn main() -> Result<()> {
     let residency = ResidencyPolicy {
         host_cache_bytes,
         device_cache_bytes,
-        max_background_inflight_bytes: 512 * 1024 * 1024,
         telemetry: TelemetryMode::Aggregate,
-        ..ResidencyPolicy::default()
+        ..architecture.residency_policy()
     };
     let backend_config = MoeBackendConfig {
         device: args.device.preference(),
