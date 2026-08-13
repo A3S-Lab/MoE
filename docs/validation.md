@@ -19,6 +19,23 @@
   `2e-5` F32 tolerance.
 - Cache failures are transactional: exceeding the context limit does not
   advance session state.
+- Complete streaming decoder logits and routes match the fully resident model
+  within `2e-5`, including BF16 source conversion and greedy decode.
+
+## Streaming Residency Gates
+
+- Each selected expert maps to exactly one atomic Power staged group.
+- Ready experts execute while other current-layer records remain in flight;
+  contributions reduce only in canonical ascending expert order.
+- Repeated routes hit Power's cache, and a cache sized for one tiny record stays
+  within its declared byte bound while recording evictions.
+- Pre-cancelled work performs zero storage reads, and cancellation cannot
+  partially advance the caller's KV cache.
+- Conversion rejects insufficient buffer budgets and never publishes a partial
+  destination. The tiny conversion test observes at most its explicit 1 MiB
+  bound.
+- Reopening a packed checkpoint verifies exact dense and expert file
+  inventories plus collection digests before model construction.
 
 ## Public Checkpoint Metadata
 

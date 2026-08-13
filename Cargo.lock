@@ -10,6 +10,7 @@ dependencies = [
  "approx",
  "candle-core",
  "candle-nn",
+ "safetensors",
  "serde",
  "serde_json",
  "tempfile",

@@ -96,7 +96,7 @@ fn streaming_fixture() -> (
         &Device::Cpu,
     )
     .unwrap();
-    let mlp = OlmoeStreamingMlp::new(config, router_weight, hierarchy).unwrap();
+    let mlp = OlmoeStreamingMlp::new(5, config, router_weight, hierarchy).unwrap();
     (directory, runtime, mlp, router)
 }
 
@@ -109,7 +109,7 @@ async fn streamed_experts_match_the_resident_reference_and_reuse_power_cache() {
     let permit = runtime.begin(&cancellation).unwrap();
 
     let first = mlp
-        .forward(5, &hidden_states, &permit, &cancellation)
+        .forward(&hidden_states, &permit, &cancellation)
         .await
         .unwrap();
     let reference = reference_layer(&router)
@@ -133,7 +133,7 @@ async fn streamed_experts_match_the_resident_reference_and_reuse_power_cache() {
     assert_eq!(first.staging.loaded_weights, first.routes.experts().len());
 
     let second = mlp
-        .forward(5, &hidden_states, &permit, &cancellation)
+        .forward(&hidden_states, &permit, &cancellation)
         .await
         .unwrap();
     assert_eq!(second.staging.loaded_weights, 0);
@@ -152,7 +152,7 @@ async fn a_cancelled_streaming_layer_does_not_start_weight_io() {
     request.cancel();
 
     assert!(mlp
-        .forward(5, &hidden_states, &permit, &request)
+        .forward(&hidden_states, &permit, &request)
         .await
         .is_err());
     assert_eq!(mlp.telemetry().storage_reads, 0);

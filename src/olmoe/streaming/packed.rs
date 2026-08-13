@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use serde::{Deserialize, Serialize};
+
 use crate::olmoe::OlmoeMoeConfig;
 use crate::{MoeError, Result};
 
@@ -8,8 +10,9 @@ const VERSION: u16 = 1;
 const HEADER_BYTES: usize = 64;
 
 /// Scalar encoding used by a lossless packed expert record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u16)]
+#[serde(rename_all = "kebab-case")]
 pub enum PackedScalarType {
     F32 = 1,
     Bf16 = 2,
@@ -26,7 +29,7 @@ impl PackedScalarType {
         }
     }
 
-    const fn byte_width(self) -> usize {
+    pub const fn byte_width(self) -> usize {
         match self {
             Self::F32 => 4,
             Self::Bf16 => 2,
@@ -49,6 +52,8 @@ pub struct PackedExpertRecord {
 }
 
 impl PackedExpertRecord {
+    pub const HEADER_BYTES: usize = HEADER_BYTES;
+
     /// Encodes finite F32 matrices in gate, up, down order.
     pub fn encode_f32(
         config: OlmoeMoeConfig,
@@ -266,10 +271,14 @@ fn section_bytes(config: OlmoeMoeConfig, scalar_type: PackedScalarType) -> Resul
 }
 
 fn validate_scalar_bytes(bytes: &[u8], scalar_type: PackedScalarType, label: &str) -> Result<()> {
-    for (index, value) in decode_scalar_bytes(bytes, scalar_type, label)?
-        .into_iter()
-        .enumerate()
-    {
+    let width = scalar_type.byte_width();
+    if !bytes.len().is_multiple_of(width) {
+        return Err(MoeError::InvalidTensor(format!(
+            "packed expert {label} byte length is not aligned to {width}"
+        )));
+    }
+    for (index, chunk) in bytes.chunks_exact(width).enumerate() {
+        let value = decode_scalar(chunk, scalar_type, label)?;
         if !value.is_finite() {
             return Err(MoeError::InvalidTensor(format!(
                 "packed expert {label} contains a non-finite value at element {index}"
@@ -292,27 +301,30 @@ fn decode_scalar_bytes(
     }
     let mut values = Vec::with_capacity(bytes.len() / width);
     for chunk in bytes.chunks_exact(width) {
-        let value = match scalar_type {
-            PackedScalarType::F32 => {
-                let encoded: [u8; 4] = chunk.try_into().map_err(|_| {
-                    MoeError::InvalidTensor(format!(
-                        "packed expert {label} contains a truncated F32 value"
-                    ))
-                })?;
-                f32::from_le_bytes(encoded)
-            }
-            PackedScalarType::Bf16 => {
-                let encoded: [u8; 2] = chunk.try_into().map_err(|_| {
-                    MoeError::InvalidTensor(format!(
-                        "packed expert {label} contains a truncated BF16 value"
-                    ))
-                })?;
-                f32::from_bits(u32::from(u16::from_le_bytes(encoded)) << 16)
-            }
-        };
-        values.push(value);
+        values.push(decode_scalar(chunk, scalar_type, label)?);
     }
     Ok(values)
+}
+
+fn decode_scalar(chunk: &[u8], scalar_type: PackedScalarType, label: &str) -> Result<f32> {
+    match scalar_type {
+        PackedScalarType::F32 => {
+            let encoded: [u8; 4] = chunk.try_into().map_err(|_| {
+                MoeError::InvalidTensor(format!(
+                    "packed expert {label} contains a truncated F32 value"
+                ))
+            })?;
+            Ok(f32::from_le_bytes(encoded))
+        }
+        PackedScalarType::Bf16 => {
+            let encoded: [u8; 2] = chunk.try_into().map_err(|_| {
+                MoeError::InvalidTensor(format!(
+                    "packed expert {label} contains a truncated BF16 value"
+                ))
+            })?;
+            Ok(f32::from_bits(u32::from(u16::from_le_bytes(encoded)) << 16))
+        }
+    }
 }
 
 fn read_length(bytes: &[u8], offset: usize, label: &str) -> Result<usize> {

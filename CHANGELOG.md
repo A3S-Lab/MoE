@@ -18,3 +18,8 @@ All notable changes to this project are documented in this file.
 - Vocabulary-bounded tokenizer loading, encoding, and decoding.
 - Complete-decoder oracle, prefill/decode parity coverage, and a range-request
   verifier for the pinned public SafeTensor headers.
+- Versioned lossless F32/BF16 expert records and deterministic bounded-buffer
+  checkpoint conversion with atomic publication and digest manifests.
+- Power-backed asynchronous expert staging, cache reuse and eviction,
+  cancellation-safe full-decoder execution, and one-per-request admission.
+- `a3s-moe-pack` CLI with machine-readable conversion evidence.

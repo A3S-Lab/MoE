@@ -30,6 +30,7 @@ pub struct OlmoeStreamingMlpOutput {
 /// to ascending expert order for deterministic numerical behavior.
 #[derive(Clone)]
 pub struct OlmoeStreamingMlp {
+    layer: u32,
     config: OlmoeMoeConfig,
     router: Linear,
     hierarchy: WeightHierarchy,
@@ -37,6 +38,7 @@ pub struct OlmoeStreamingMlp {
 
 impl OlmoeStreamingMlp {
     pub fn new(
+        layer: u32,
         config: OlmoeMoeConfig,
         router_weight: Tensor,
         hierarchy: WeightHierarchy,
@@ -63,7 +65,27 @@ impl OlmoeStreamingMlp {
                 "streaming router and Power runtime must use the same device".to_string(),
             ));
         }
+        for expert in 0..config.num_experts {
+            let expert = u32::try_from(expert).map_err(|_| {
+                MoeError::InvalidConfig("expert index exceeds the routing contract".to_string())
+            })?;
+            let name = packed_expert_tensor_name(layer, expert);
+            let descriptor = hierarchy.store().descriptor(&name).ok_or_else(|| {
+                MoeError::InvalidTensor(format!(
+                    "Power weight store is missing packed expert '{name}'"
+                ))
+            })?;
+            if descriptor.dtype != "u8"
+                || descriptor.shape.len() != 1
+                || descriptor.shape[0] < PackedExpertRecord::HEADER_BYTES
+            {
+                return Err(MoeError::InvalidTensor(format!(
+                    "packed expert '{name}' must be a rank-one U8 tensor with a complete header"
+                )));
+            }
+        }
         Ok(Self {
+            layer,
             config,
             router: Linear::new(router_weight, None),
             hierarchy,
@@ -80,7 +102,6 @@ impl OlmoeStreamingMlp {
 
     pub async fn forward(
         &self,
-        layer: u32,
         hidden_states: &Tensor,
         permit: &ExecutionPermit,
         cancellation: &CancellationToken,
@@ -119,13 +140,13 @@ impl OlmoeStreamingMlp {
             self.config.num_experts,
             router_logits.flatten_all()?.to_vec1::<f32>()?,
         )?;
-        let routes = select_routes(layer, &route_matrix, self.config)?;
+        let routes = select_routes(self.layer, &route_matrix, self.config)?;
         let groups = routes
             .experts()
             .iter()
             .map(|expert| {
                 StagedWeightGroupRequest::new(vec![WeightRequest::new(
-                    WeightKey::new(layer, packed_expert_tensor_name(layer, *expert)),
+                    WeightKey::new(self.layer, packed_expert_tensor_name(self.layer, *expert)),
                     PlacementPreference::Host,
                 )])
             })
@@ -248,6 +269,7 @@ impl std::fmt::Debug for OlmoeStreamingMlp {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("OlmoeStreamingMlp")
+            .field("layer", &self.layer)
             .field("config", &self.config)
             .field("hierarchy", &"Power weight hierarchy")
             .finish_non_exhaustive()

@@ -165,7 +165,7 @@ impl OlmoeCheckpoint {
     }
 }
 
-fn enforce_metadata_limit(path: &Path, limit: u64, label: &str) -> Result<()> {
+pub(super) fn enforce_metadata_limit(path: &Path, limit: u64, label: &str) -> Result<()> {
     let metadata = path.symlink_metadata()?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > limit {
         return Err(MoeError::InvalidConfig(format!(
@@ -176,7 +176,7 @@ fn enforce_metadata_limit(path: &Path, limit: u64, label: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_shard_name(name: &str) -> Result<()> {
+pub(super) fn validate_shard_name(name: &str) -> Result<()> {
     let path = Path::new(name);
     let mut components = path.components();
     let single_file = matches!(components.next(), Some(Component::Normal(_)))
@@ -190,7 +190,7 @@ fn validate_shard_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn required_tensor_names(config: &OlmoeConfig) -> Vec<String> {
+pub(super) fn required_tensor_names(config: &OlmoeConfig) -> Vec<String> {
     let global_count = if config.tie_word_embeddings { 2 } else { 3 };
     let attention_biases = if config.attention_bias { 4 } else { 0 };
     let layer_tensor_count = 9 + attention_biases + config.num_experts * 3;
@@ -226,6 +226,13 @@ fn required_tensor_names(config: &OlmoeConfig) -> Vec<String> {
         }
     }
     names
+}
+
+pub(super) fn dense_tensor_names(config: &OlmoeConfig) -> Vec<String> {
+    required_tensor_names(config)
+        .into_iter()
+        .filter(|name| !name.contains(".mlp.experts."))
+        .collect()
 }
 
 #[cfg(test)]

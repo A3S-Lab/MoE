@@ -3,6 +3,7 @@ mod config;
 mod cpu;
 mod expert;
 mod layer;
+mod packed_checkpoint;
 mod router;
 mod streaming;
 mod tokenizer;
@@ -12,9 +13,12 @@ pub use config::{OlmoeConfig, OlmoeMoeConfig};
 pub use cpu::{OlmoeCpuModel, OlmoeForwardOutput, OlmoeKvCache};
 pub use expert::OlmoeExpertWeights;
 pub use layer::{OlmoeMoeLayer, OlmoeMoeOutput};
+pub use packed_checkpoint::{
+    OlmoeConversionOptions, OlmoeConversionReport, OlmoePackedCheckpoint, OlmoePackedManifest,
+};
 pub use router::{OlmoeRouter, OlmoeRouterOutput};
 pub use streaming::{
-    packed_expert_tensor_name, OlmoeStreamingMlp, OlmoeStreamingMlpOutput, PackedExpertRecord,
-    PackedScalarType,
+    packed_expert_tensor_name, OlmoeStreamingForwardOutput, OlmoeStreamingMlp,
+    OlmoeStreamingMlpOutput, OlmoeStreamingModel, PackedExpertRecord, PackedScalarType,
 };
 pub use tokenizer::OlmoeTokenizer;

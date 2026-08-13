@@ -14,13 +14,14 @@ categories = ["science"]
 a3s-power = { git = "https://github.com/A3S-Lab/Power.git", rev = "7ce6fa5", default-features = false, features = ["embedded-inference"] }
 candle-core = { version = "0.10.2", default-features = false }
 candle-nn = { version = "0.10.2", default-features = false }
+safetensors = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tempfile = "3"
 thiserror = "1"
 tokenizers = "0.22.2"
 tokio-util = "0.7"
 
 [dev-dependencies]
 approx = "0.5"
-tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

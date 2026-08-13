@@ -50,12 +50,21 @@ Dense weights may remain ordinary tensors. Expert weights are addressed by
 layer and expert, even when the source checkpoint stores all experts in a
 single three-dimensional tensor.
 
-The streaming path adds a deterministic conversion tool. One packed expert
-record contains gate/up, down, scales, dtype identifiers, dimensions, and
-offsets. The complete record is stored as one `U8` SafeTensor so Power can
-verify, stage, and cache it atomically. The record format is versioned and
-digest-bound. Unsupported versions and dimension mismatches fail before
-execution.
+The streaming path includes a deterministic conversion tool. One packed expert
+record contains a fixed header followed by exact gate, up, and down scalar
+bytes. The header declares its version, F32 or BF16 encoding, dimensions, and
+section lengths. The complete record is stored as one `U8` SafeTensor so Power
+can verify, stage, and cache it atomically. The expert collection digest in the
+completion manifest binds every record name and byte. Unsupported versions,
+trailing or truncated data, non-finite values, and dimension mismatches fail
+closed.
+
+Packed checkpoints separate `dense/` and `experts/`. Dense tensors retain their
+source precision and are split one tensor per file, while expert files contain
+a bounded number of atomic records from one layer. Power opens only
+`experts/` for residency, preventing resident dense weights from being counted
+or duplicated in the expert cache. The converter publishes the destination
+only after both collections have been reopened and their digests recorded.
 
 Only `WeightHierarchy` owns resident bytes. Model code may hold short-lived
 views for the current operation but cannot retain a parallel byte cache.
@@ -106,10 +115,16 @@ milestones reuse the same oracle for batched, streaming, and accelerator paths.
 
 ### M2: Streaming Residency
 
-- Convert experts into versioned atomic records.
-- Map exact routes to Power weight requests.
-- Overlap next expert/layer reads with current compute under cancellation.
-- Demonstrate a bounded peak resident set and no second model cache.
+- Implemented: deterministic, lossless F32/BF16 conversion into versioned
+  atomic records under an explicit buffer bound.
+- Implemented: exact route unions mapped one-to-one to Power staged weight
+  groups with no model-specific cache.
+- Implemented: ready-group compute overlaps remaining current-layer reads, with
+  cancellation checks and ascending-expert reduction restored afterward.
+- Implemented: complete decoder and greedy generation parity, transactional KV
+  state, cache eviction evidence, and one admission permit per request.
+- Deferred to performance tuning: speculative next-layer prefetch based on
+  Power's route-coupling hints; hints never alter exact current-layer routes.
 
 ### M3: Continuous Batching
 

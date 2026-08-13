@@ -22,6 +22,9 @@ pub enum MoeError {
     #[error("tensor execution failed: {0}")]
     Candle(#[from] candle_core::Error),
 
+    #[error("SafeTensor operation failed: {0}")]
+    SafeTensor(#[from] safetensors::SafeTensorError),
+
     #[error("tokenizer operation failed: {0}")]
     Tokenizer(String),
 }

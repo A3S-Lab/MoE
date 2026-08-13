@@ -13,8 +13,8 @@ active parameters.
 
 ## Current Status
 
-The M0 numerical contract and the resident M1 CPU engine are implemented and
-tested:
+The M0 numerical contract, resident M1 CPU engine, and bounded M2 expert
+streaming path are implemented and tested:
 
 - Hugging Face compatible OLMoE configuration parsing and strict geometry
   validation.
@@ -35,12 +35,23 @@ tested:
   prefill/decode generation.
 - Full-prefill versus incremental-decode parity and a pinned complete-decoder
   oracle covering logits and every layer's routes.
+- A versioned lossless F32/BF16 packed expert format with strict header,
+  dimension, length, finite-value, and dtype validation.
+- A deterministic bounded-buffer converter that publishes a packed checkpoint
+  atomically and records source, dense, and expert collection digests.
+- A complete asynchronous decoder that keeps dense weights resident, obtains
+  the exact routed expert union from Power, computes ready experts while other
+  records load, and restores canonical reduction order.
+- One Power admission permit per generation request, transactional cancellation,
+  measured cache bounds, and resident-versus-streaming parity for prefill and
+  incremental greedy decode.
 
-This is a complete correctness baseline, not yet a bounded-memory serving
-engine. Streaming expert residency, continuous batching, sampling, chat
-templates, and the Power HTTP backend are the next milestones. The 13.8 GB
-public checkpoint's metadata contract is verified without downloading weight
-payloads; a full real-checkpoint numerical run remains an M1 acceptance item.
+This is a bounded expert-residency engine, not yet a production serving stack.
+Continuous batching, sampling, chat templates, and the Power HTTP backend are
+the next milestones. Dense weights remain resident in the current CPU path.
+The 13.8 GB public checkpoint's metadata contract is verified without
+downloading weight payloads; a full real-checkpoint conversion and numerical
+run remains an M1 acceptance item.
 
 ## Architecture Boundary
 
@@ -54,10 +65,10 @@ a3s-power (runtime owner)
   admission / batching / storage-RAM-device residency / integrity / TEE / API
 ```
 
-There is one residency hierarchy. Model code must consume weights returned by
-Power and must not introduce a second expert cache. A future packed expert
-record remains an opaque `U8` SafeTensor to Power; this crate validates and
-interprets the record header and quantization data.
+There is one residency hierarchy. Model code consumes weights returned by
+Power and does not introduce a second expert cache. Each packed expert remains
+an opaque `U8` SafeTensor to Power; this crate validates and interprets its
+versioned header and exact scalar payload.
 
 See [Architecture](docs/architecture.md) for invariants and the delivery plan.
 
@@ -75,6 +86,19 @@ the 13.8 GB payload:
 ```shell
 python tools/verify_hf_contract.py
 ```
+
+Convert a downloaded Hugging Face checkpoint without buffering a complete
+layer or model:
+
+```shell
+cargo run --release --bin a3s-moe-pack -- \
+  /models/OLMoE-1B-7B-0924 /models/OLMoE-1B-7B-0924-a3s \
+  --experts-per-file 8 --max-buffer-mib 512
+```
+
+The destination is created only after conversion and digest validation
+complete. The command refuses to overwrite an existing destination and emits a
+JSON conversion report containing the observed peak buffered bytes.
 
 Regenerate the tiny oracle only when intentionally changing the pinned model
 contract:
