@@ -30,6 +30,10 @@ struct Args {
     #[arg(long)]
     resident_checkpoint: Option<PathBuf>,
 
+    /// Path-free checkpoint label recorded in evidence (defaults to the directory name).
+    #[arg(long)]
+    checkpoint_label: Option<String>,
+
     #[arg(long, default_value = "olmoe-benchmark")]
     model: String,
 
@@ -205,6 +209,17 @@ async fn main() -> Result<()> {
             args.checkpoint.display()
         )
     })?;
+    let checkpoint_label = match args.checkpoint_label.as_deref() {
+        Some(label) if label.trim().is_empty() => {
+            anyhow::bail!("--checkpoint-label must not be empty")
+        }
+        Some(label) => label.to_string(),
+        None => checkpoint
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("packed-checkpoint")
+            .to_string(),
+    };
     let config = OlmoeConfig::from_json_path(checkpoint.join("config.json"))?;
     let tokenizer =
         OlmoeTokenizer::from_file(checkpoint.join("tokenizer.json"), config.vocab_size)?;
@@ -279,7 +294,7 @@ async fn main() -> Result<()> {
         model: ModelEvidence {
             name: manifest.name,
             weights_sha256: manifest.sha256,
-            packed_checkpoint: checkpoint.display().to_string(),
+            packed_checkpoint: checkpoint_label,
             packed_bytes: manifest.size,
         },
         system: SystemEvidence {

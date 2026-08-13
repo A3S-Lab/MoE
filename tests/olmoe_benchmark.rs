@@ -23,6 +23,8 @@ fn benchmark_emits_self_describing_json_evidence() {
             "2",
             "--host-cache-mib",
             "1",
+            "--checkpoint-label",
+            "fixture-packed",
         ])
         .arg("--resident-checkpoint")
         .arg(directory.path().join("source"))
@@ -36,6 +38,7 @@ fn benchmark_emits_self_describing_json_evidence() {
     );
     let evidence: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(evidence["schema"], "a3s.moe.olmoe-performance.v1");
+    assert_eq!(evidence["model"]["packedCheckpoint"], "fixture-packed");
     assert_eq!(evidence["configuration"]["promptTokens"], 1);
     assert_eq!(evidence["configuration"]["requestedDevice"]["kind"], "cpu");
     assert_eq!(evidence["configuration"]["resolvedDevice"]["kind"], "cpu");

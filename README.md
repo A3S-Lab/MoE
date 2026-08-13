@@ -175,6 +175,7 @@ fully resident CPU path in an isolated child process:
 cargo run --release --features benchmark --bin a3s-moe-bench -- \
   /models/OLMoE-1B-7B-0924-a3s \
   --prompt "Bitcoin is" --max-tokens 32 --warm-samples 5 \
+  --checkpoint-label olmoe-1b-7b-bf16 \
   --resident-checkpoint /models/OLMoE-1B-7B-0924 \
   > olmoe-performance.json
 ```

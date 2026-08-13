@@ -44,6 +44,7 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
   --max-tokens 32 \
   --warm-samples 5 \
   --host-cache-mib 512 \
+  --checkpoint-label olmoe-1b-7b-bf16 \
   --resident-checkpoint /models/OLMoE-1B-7B-0924 \
   > olmoe-performance.json
 ```
@@ -65,4 +66,6 @@ The artifact uses schema `a3s.moe.olmoe-performance.v1` and includes:
 
 Compare artifacts only when model digest, prompt token IDs, generation policy,
 hardware, build profile, cache policy, and page-cache preparation are
-equivalent.
+equivalent. `packedCheckpoint` is a caller-provided path-free label (or the
+checkpoint directory name by default); the logical weights digest is the
+machine-independent identity.
