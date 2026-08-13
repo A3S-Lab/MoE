@@ -1,11 +1,12 @@
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{Embedding, Linear, Module, RmsNorm, VarBuilder};
 
+use crate::decoder::RotaryEmbedding;
 use crate::olmoe::OlmoeConfig;
 use crate::{MoeError, Result};
 
-use super::attention::{OlmoeAttention, OlmoeRotaryEmbedding};
-use super::cache::OlmoeKvCache;
+use super::attention::OlmoeAttention;
+use super::OlmoeKvCache;
 
 #[derive(Debug, Clone)]
 struct OlmoeDenseDecoderLayer {
@@ -17,7 +18,7 @@ struct OlmoeDenseDecoderLayer {
 impl OlmoeDenseDecoderLayer {
     fn load(
         config: &OlmoeConfig,
-        rotary: OlmoeRotaryEmbedding,
+        rotary: RotaryEmbedding,
         builder: VarBuilder<'_>,
     ) -> Result<Self> {
         Ok(Self {
@@ -60,7 +61,13 @@ impl OlmoeDenseModel {
                 builder.dtype()
             )));
         }
-        let rotary = OlmoeRotaryEmbedding::new(&config, builder.dtype(), builder.device())?;
+        let rotary = RotaryEmbedding::new(
+            config.hidden_size / config.num_attention_heads,
+            config.max_position_embeddings,
+            config.rope_theta,
+            builder.dtype(),
+            builder.device(),
+        )?;
         let embeddings = candle_nn::embedding(
             config.vocab_size,
             config.hidden_size,
@@ -143,10 +150,7 @@ impl OlmoeDenseModel {
         let weights = self.layers.get(layer).ok_or_else(|| {
             MoeError::Inference(format!("dense decoder layer {layer} is unavailable"))
         })?;
-        let layer_cache = cache
-            .layers
-            .get_mut(layer)
-            .ok_or_else(|| MoeError::Inference(format!("KV cache layer {layer} is unavailable")))?;
+        let layer_cache = cache.layer_mut(layer)?;
         let normalized = weights.input_norm.forward(hidden_states)?;
         let attended = weights
             .attention

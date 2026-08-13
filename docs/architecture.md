@@ -207,14 +207,17 @@ fine-tune. It does not present the base model as instruction-tuned.
   memory bounds, numerical parity, and service generation are tested.
 - M6 pending acceptance: integrate an attested key-release provider and record
   peak-memory and inference evidence on a real confidential-computing host.
-- M7 implemented contract: Qwen3-MoE validates its independent head dimension,
-  sparse/dense layer schedule, MoE-specific intermediate width, and normalized
-  top-k policy. Its sparse layer uses the shared full-softmax router, fused
-  gate/up expert equation, canonical reduction, and unchanged Power
-  `RoutedExpertBatch`, with a dependency-free numerical fixture.
-- M7 pending implementation: add Qwen3-MoE's per-head Q/K normalization,
-  complete decoder and KV cache, fused 3-D checkpoint conversion, Power-backed
-  streaming model, tokenizer, service adapter, and pinned public acceptance.
+- M7 implemented reference backend: Qwen3-MoE validates its independent head
+  dimension, sparse/dense layer schedule, MoE-specific intermediate width, and
+  normalized top-k policy. Its resident F32 CPU decoder implements per-head
+  Q/K normalization, GQA, RoPE, optional sliding attention, fused 3-D expert
+  tensors, canonical reduction, transactional shared KV cache, and greedy
+  generation. A dependency-free full-decoder fixture validates logits, router
+  logits, and unchanged Power `RoutedExpertBatch` routes across dense and
+  sparse layers.
+- M7 pending implementation: add fused-checkpoint conversion, Power-backed
+  expert streaming, tokenizer and service adapters, plus pinned public-model
+  numerical and performance acceptance.
 
 ## Acceptance Gates
 

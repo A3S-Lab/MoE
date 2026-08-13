@@ -113,7 +113,7 @@ These gates validate the software boundary and bounded decrypted buffers. They
 do not claim remote attestation or hardware-isolated execution; that evidence
 remains an M6 acceptance item on a confidential-computing host.
 
-## Qwen3-MoE Contract Gates
+## Qwen3-MoE Resident Backend Gates
 
 - The published 30B-A3B geometry validates an explicit 128-wide attention head
   even though `hidden_size / num_attention_heads` is 64, preventing OLMoE's
@@ -123,10 +123,19 @@ remains an M6 acceptance item on a confidential-computing host.
 - A dependency-free fixture covers router logits, normalized selected
   full-softmax weights, exact expert IDs, fused gate/up ordering, and final
   weighted hidden states for two positions.
+- A second dependency-free fixture covers the complete decoder with an
+  explicit head dimension that differs from `hidden_size / heads`, per-head
+  Q/K normalization, GQA, RoPE, one dense MLP layer, one fused sparse layer,
+  final logits, router logits, and exact routes.
+- Full prefill matches token-at-a-time KV-cache decode for both unrestricted
+  causal attention and a two-token sliding window. Cache-limit failures leave
+  the caller's transactional state unchanged.
 - The Qwen3-MoE sparse result is expressed directly as Power's unchanged
   `RoutedExpertBatch`; no model-specific Power type or cache was added.
 
-These are M7 contract gates, not complete Qwen3-MoE inference acceptance.
+These gates accept the resident CPU reference backend. They do not yet accept
+Qwen3-MoE checkpoint conversion, Power-backed expert streaming, service
+composition, or a public 30B-A3B checkpoint run.
 
 The benchmark's first generation is application-cold with respect to Power's
 expert cache. Integrity verification may already populate the operating-system

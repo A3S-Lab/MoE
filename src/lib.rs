@@ -4,6 +4,7 @@
 //! composition. This crate owns exact model architecture and numerical
 //! semantics, starting with OLMoE.
 
+mod decoder;
 mod error;
 mod matrix;
 pub mod olmoe;
@@ -12,6 +13,7 @@ pub mod qwen3_moe;
 pub mod service;
 mod sparse;
 
+pub use decoder::DecoderKvCache;
 pub use error::{MoeError, Result};
 pub use matrix::Matrix;
 pub use sparse::{

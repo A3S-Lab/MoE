@@ -2,26 +2,23 @@ use candle_core::Tensor;
 
 use crate::{MoeError, Result};
 
-/// Per-session OLMoE key/value cache.
-///
-/// The cache is separate from immutable model weights so one model can serve
-/// multiple sessions without sharing request state.
+/// Per-session key/value cache shared by decoder-only model families.
 #[derive(Debug, Clone)]
-pub struct OlmoeKvCache {
-    pub(super) layers: Vec<LayerKvCache>,
+pub struct DecoderKvCache {
+    pub(crate) layers: Vec<LayerKvCache>,
     position: usize,
     max_position_embeddings: usize,
     batch_size: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct LayerKvCache {
-    pub(super) key: Option<Tensor>,
-    pub(super) value: Option<Tensor>,
+pub(crate) struct LayerKvCache {
+    pub(crate) key: Option<Tensor>,
+    pub(crate) value: Option<Tensor>,
 }
 
-impl OlmoeKvCache {
-    pub(super) fn new(layer_count: usize, max_position_embeddings: usize) -> Self {
+impl DecoderKvCache {
+    pub(crate) fn new(layer_count: usize, max_position_embeddings: usize) -> Self {
         Self {
             layers: vec![LayerKvCache::default(); layer_count],
             position: 0,
@@ -71,7 +68,13 @@ impl OlmoeKvCache {
         self.batch_size = None;
     }
 
-    pub(super) fn validate_step(
+    pub(crate) fn layer_mut(&mut self, layer: usize) -> Result<&mut LayerKvCache> {
+        self.layers
+            .get_mut(layer)
+            .ok_or_else(|| MoeError::Inference(format!("KV cache layer {layer} is unavailable")))
+    }
+
+    pub(crate) fn validate_step(
         &self,
         layer_count: usize,
         batch_size: usize,
@@ -110,7 +113,7 @@ impl OlmoeKvCache {
         Ok(())
     }
 
-    pub(super) fn commit_step(&mut self, batch_size: usize, sequence_length: usize) {
+    pub(crate) fn commit_step(&mut self, batch_size: usize, sequence_length: usize) {
         self.batch_size = Some(batch_size);
         self.position += sequence_length;
     }
@@ -122,7 +125,7 @@ mod tests {
 
     #[test]
     fn reset_clears_position_and_batch_binding() {
-        let mut cache = OlmoeKvCache::new(2, 8);
+        let mut cache = DecoderKvCache::new(2, 8);
         cache.validate_step(2, 1, 3).unwrap();
         cache.commit_step(1, 3);
         assert!(cache.validate_step(2, 2, 1).is_err());

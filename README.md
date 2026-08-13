@@ -67,10 +67,13 @@ foundation are implemented and tested:
   manifest and consumed through the same Power residency hierarchy.
 - An `a3s-moe-encrypt` CLI and typed encrypted service source that keep keys out
   of arguments, logs, model manifests, and decrypted intermediate files.
-- Qwen3-MoE configuration and sparse-layer contracts, including its distinct
-  attention head dimension, sparse/dense layer schedule, normalized top-k
-  policy, and a dependency-free numerical oracle over the shared Power routing
-  boundary.
+- A fully resident Qwen3-MoE F32 CPU correctness backend with its distinct
+  attention head dimension, per-head Q/K normalization, GQA, RoPE,
+  sparse/dense layer schedule, normalized top-k policy, fused 3-D expert
+  tensors, transactional KV cache, and greedy decoding.
+- A dependency-free full Qwen3-MoE decoder oracle covering logits, router
+  logits, exact routes, dense-to-sparse layer transitions, prefill/decode
+  parity, and sliding attention over the shared Power routing boundary.
 
 The HTTP transport, OpenAI response framing, authentication, rate limiting,
 metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
@@ -86,7 +89,7 @@ fine-tune.
 
 ```text
 a3s-moe (model owner)
-  config / tensor names / OLMoE math / tokenizer / generation
+  config / tensor names / OLMoE + Qwen3-MoE math / tokenizer / generation
                          |
                          | exact routes + atomic weight requests
                          v
@@ -109,6 +112,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 python tools/test_generate_public_oracle.py
 python tools/test_generate_qwen3_moe_oracle.py
+python tools/test_generate_qwen3_moe_full_oracle.py
 ```
 
 Verify the pinned public checkpoint's 3,219 tensor headers without downloading
@@ -247,16 +251,19 @@ Review changes before replacing `tests/fixtures/olmoe_tiny_oracle.json`.
 The same rule applies to `generate_full_model_oracle.py` and its complete
 decoder fixture.
 
-The Qwen3-MoE sparse fixture follows the same review-only workflow:
+The Qwen3-MoE sparse-layer and full-decoder fixtures follow the same
+review-only workflow:
 
 ```shell
 python tools/generate_qwen3_moe_oracle.py
+python tools/generate_qwen3_moe_full_oracle.py
 ```
 
-M7 currently proves the second family's configuration, exact routed sparse
-math, and reuse of Power's model-neutral `RoutedExpertBatch`. Its complete
-decoder, fused-checkpoint conversion, streaming model, and service adapter are
-still pending and are not advertised as supported inference yet.
+M7 now provides resident CPU reference inference for the second family and
+reuses Power's model-neutral `RoutedExpertBatch`. Fused-checkpoint conversion,
+Power-backed expert streaming, tokenizer integration, service composition, and
+pinned public-checkpoint acceptance remain pending; Qwen3-MoE is therefore not
+yet advertised as a production streaming backend.
 
 ## License
 

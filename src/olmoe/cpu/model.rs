@@ -5,9 +5,9 @@ use candle_nn::VarBuilder;
 use crate::olmoe::OlmoeConfig;
 use crate::{MoeError, Result};
 
-use super::cache::OlmoeKvCache;
 use super::dense::{validate_generation_request, OlmoeDenseModel};
 use super::experts::ResidentOlmoeMlp;
+use super::OlmoeKvCache;
 
 /// Complete output from one CPU prefill or decode step.
 #[derive(Debug)]

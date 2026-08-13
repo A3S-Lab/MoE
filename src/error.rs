@@ -1,7 +1,7 @@
 /// Error returned by model-owned MoE validation or execution.
 #[derive(Debug, thiserror::Error)]
 pub enum MoeError {
-    #[error("invalid OLMoE configuration: {0}")]
+    #[error("invalid MoE configuration: {0}")]
     InvalidConfig(String),
 
     #[error("invalid MoE tensor: {0}")]
