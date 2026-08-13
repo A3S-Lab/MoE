@@ -114,6 +114,17 @@ impl OlmoeConfig {
                 "num_attention_heads must be divisible by num_key_value_heads".to_string(),
             ));
         }
+        let head_dim = self.hidden_size / self.num_attention_heads;
+        if !head_dim.is_multiple_of(2) {
+            return Err(MoeError::InvalidConfig(
+                "attention head dimension must be even for rotary embeddings".to_string(),
+            ));
+        }
+        if self.num_hidden_layers > u32::MAX as usize || self.num_experts > u32::MAX as usize {
+            return Err(MoeError::InvalidConfig(
+                "layer and expert counts must fit the Power routing contract".to_string(),
+            ));
+        }
         if self.hidden_act != "silu" {
             return Err(MoeError::InvalidConfig(format!(
                 "only OLMoE's silu activation is supported, found '{}'",
@@ -137,6 +148,16 @@ impl OlmoeConfig {
             return Err(MoeError::InvalidConfig(
                 "clip_qkv must be finite and positive when present".to_string(),
             ));
+        }
+        for (name, token) in [
+            ("eos_token_id", self.eos_token_id),
+            ("pad_token_id", self.pad_token_id),
+        ] {
+            if token.is_some_and(|token| token as usize >= self.vocab_size) {
+                return Err(MoeError::InvalidConfig(format!(
+                    "{name} must be smaller than vocab_size"
+                )));
+            }
         }
 
         let expert_gate_up = self

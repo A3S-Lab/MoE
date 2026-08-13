@@ -13,7 +13,8 @@ active parameters.
 
 ## Current Status
 
-The M0 numerical contract is implemented and tested:
+The M0 numerical contract and the resident M1 CPU engine are implemented and
+tested:
 
 - Hugging Face compatible OLMoE configuration parsing and strict geometry
   validation.
@@ -25,10 +26,21 @@ The M0 numerical contract is implemented and tested:
   and final hidden states.
 - Conversion of exact model routes into Power's `RoutedExpertBatch` without
   substitution, reordering, or renormalization.
+- Complete embeddings, RMSNorm, Q/K normalization, split-half RoPE, grouped
+  query causal attention, transactional KV cache, residual decoder layers,
+  final norm, and LM head.
+- Safe validation of the published Hugging Face index before any tensor bytes
+  are loaded, plus a deliberately fully resident F32 correctness loader.
+- GPT-NeoX tokenizer loading, vocabulary-bound encode/decode, and greedy
+  prefill/decode generation.
+- Full-prefill versus incremental-decode parity and a pinned complete-decoder
+  oracle covering logits and every layer's routes.
 
-This is a correctness baseline, not yet a complete text-generation engine.
-Model loading, transformer attention, KV cache, streaming expert residency,
-tokenization, and the Power HTTP backend are the next milestones.
+This is a complete correctness baseline, not yet a bounded-memory serving
+engine. Streaming expert residency, continuous batching, sampling, chat
+templates, and the Power HTTP backend are the next milestones. The 13.8 GB
+public checkpoint's metadata contract is verified without downloading weight
+payloads; a full real-checkpoint numerical run remains an M1 acceptance item.
 
 ## Architecture Boundary
 
@@ -57,6 +69,13 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
+Verify the pinned public checkpoint's 3,219 tensor headers without downloading
+the 13.8 GB payload:
+
+```shell
+python tools/verify_hf_contract.py
+```
+
 Regenerate the tiny oracle only when intentionally changing the pinned model
 contract:
 
@@ -66,6 +85,8 @@ python tools/generate_tiny_oracle.py
 
 The generator prints JSON to stdout and never overwrites the checked fixture.
 Review changes before replacing `tests/fixtures/olmoe_tiny_oracle.json`.
+The same rule applies to `generate_full_model_oracle.py` and its complete
+decoder fixture.
 
 ## License
 

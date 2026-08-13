@@ -93,12 +93,16 @@ milestones reuse the same oracle for batched, streaming, and accelerator paths.
 
 ### M1: CPU Correctness
 
-- Load published SafeTensor indexes and sharded tensors.
-- Implement embeddings, RMSNorm, Q/K normalization, RoPE, causal attention,
+- Implemented: published SafeTensor index validation and resident sharded
+  tensor loading.
+- Implemented: embeddings, RMSNorm, Q/K normalization, RoPE, causal attention,
   sparse MLP layers, final norm, and LM head.
-- Add prefill/decode KV cache and deterministic greedy generation.
-- Compare layer outputs, logits, routes, and generated token IDs with a pinned
-  Transformers reference.
+- Implemented: transactional prefill/decode KV cache and deterministic greedy
+  generation.
+- Implemented: pinned equation-level logits/routes oracle and
+  prefill-versus-incremental parity.
+- Pending acceptance: run the complete 13.8 GB pinned public checkpoint against
+  Transformers token IDs and logits on a sufficiently provisioned host.
 
 ### M2: Streaming Residency
 

@@ -18,6 +18,12 @@ pub enum MoeError {
 
     #[error("Power rejected the routed expert batch: {0}")]
     Power(#[from] a3s_power::error::PowerError),
+
+    #[error("tensor execution failed: {0}")]
+    Candle(#[from] candle_core::Error),
+
+    #[error("tokenizer operation failed: {0}")]
+    Tokenizer(String),
 }
 
 pub type Result<T> = std::result::Result<T, MoeError>;

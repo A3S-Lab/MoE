@@ -47,7 +47,6 @@ impl OlmoeRouter {
             .checked_mul(self.config.num_experts)
             .ok_or_else(|| MoeError::Inference("router logit count overflowed".to_string()))?;
         let mut logits = Vec::with_capacity(logit_count);
-        let mut selections = Vec::with_capacity(hidden_states.rows());
         for position in 0..hidden_states.rows() {
             let input = hidden_states.row(position)?;
             let mut row_logits = Vec::with_capacity(self.config.num_experts);
@@ -60,49 +59,69 @@ impl OlmoeRouter {
                 }
                 row_logits.push(value);
             }
-            let probabilities = stable_softmax(&row_logits)?;
-            let mut indices: Vec<usize> = (0..self.config.num_experts).collect();
-            indices.sort_unstable_by(|left, right| {
-                probabilities[*right]
-                    .total_cmp(&probabilities[*left])
-                    .then_with(|| left.cmp(right))
-            });
-            indices.truncate(self.config.top_k);
+            logits.extend_from_slice(&row_logits);
+        }
 
-            let normalization = if self.config.normalize_top_k {
-                let sum = indices
-                    .iter()
-                    .map(|index| probabilities[*index])
-                    .sum::<f32>();
-                if !sum.is_finite() || sum <= 0.0 {
-                    return Err(MoeError::Inference(format!(
-                        "top-k probability normalization failed at position {position}"
-                    )));
-                }
-                sum
-            } else {
-                1.0
-            };
-            let routed = indices
+        let logits = Matrix::new(hidden_states.rows(), self.config.num_experts, logits)?;
+        let routes = select_routes(layer, &logits, self.config)?;
+        Ok(OlmoeRouterOutput { logits, routes })
+    }
+}
+
+pub(super) fn select_routes(
+    layer: u32,
+    logits: &Matrix,
+    config: OlmoeMoeConfig,
+) -> Result<RoutedExpertBatch> {
+    config.validate()?;
+    if logits.columns() != config.num_experts {
+        return Err(MoeError::InvalidTensor(format!(
+            "router logits must have {} columns, found {}",
+            config.num_experts,
+            logits.columns()
+        )));
+    }
+    let mut selections = Vec::with_capacity(logits.rows());
+    for position in 0..logits.rows() {
+        let probabilities = stable_softmax(logits.row(position)?)?;
+        let mut indices: Vec<usize> = (0..config.num_experts).collect();
+        indices.sort_unstable_by(|left, right| {
+            probabilities[*right]
+                .total_cmp(&probabilities[*left])
+                .then_with(|| left.cmp(right))
+        });
+        indices.truncate(config.top_k);
+
+        let normalization = if config.normalize_top_k {
+            let sum = indices
+                .iter()
+                .map(|index| probabilities[*index])
+                .sum::<f32>();
+            if !sum.is_finite() || sum <= 0.0 {
+                return Err(MoeError::Inference(format!(
+                    "top-k probability normalization failed at position {position}"
+                )));
+            }
+            sum
+        } else {
+            1.0
+        };
+        selections.push(
+            indices
                 .into_iter()
                 .map(|expert| RoutedExpert {
                     expert: expert as u32,
                     weight: probabilities[expert] / normalization,
                 })
-                .collect();
-            logits.extend_from_slice(&row_logits);
-            selections.push(routed);
-        }
-
-        let logits = Matrix::new(hidden_states.rows(), self.config.num_experts, logits)?;
-        let routes = RoutedExpertBatch::new(
-            layer,
-            selections,
-            self.config.num_experts as u32,
-            self.config.top_k,
-        )?;
-        Ok(OlmoeRouterOutput { logits, routes })
+                .collect(),
+        );
     }
+    Ok(RoutedExpertBatch::new(
+        layer,
+        selections,
+        config.num_experts as u32,
+        config.top_k,
+    )?)
 }
 
 fn dot(left: &[f32], right: &[f32]) -> f32 {
