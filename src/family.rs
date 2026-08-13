@@ -9,6 +9,8 @@ use crate::{MoeError, Result};
 const CONFIG_FILE: &str = "config.json";
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * 1024 * 1024;
+#[cfg(test)]
+const QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES: u64 = 61_066_575_648;
 const QWEN3_MOE_MAX_MODEL_FILES: usize = 8_192;
 const QWEN3_MOE_MAX_MODEL_BYTES: u64 = 64 * GIB;
 
@@ -138,9 +140,9 @@ mod tests {
     fn public_model_profiles_cover_real_checkpoint_geometry_without_allocation() {
         let power_default = InferenceLimits::default();
         let qwen = MoeArchitecture::Qwen3Moe.inference_limits();
-        assert!(power_default.max_model_bytes < 61_064_245_248);
+        assert!(power_default.max_model_bytes < QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES);
         assert!(power_default.max_model_files < 48 * 128);
-        assert!(qwen.max_model_bytes >= 61_064_245_248);
+        assert!(qwen.max_model_bytes >= QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES);
         assert!(qwen.max_model_files >= 48 * 128);
         assert_eq!(MoeArchitecture::Olmoe.inference_limits(), power_default);
         qwen.validate().unwrap();

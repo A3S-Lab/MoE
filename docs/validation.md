@@ -152,10 +152,11 @@ remains an M6 acceptance item on a confidential-computing host.
 - Packed manifests bind exact dense and sparse-only expert inventories. Dense
   schedule layers have no expert records, and each sparse layer has exactly
   `num_experts` atomic records.
-- The Qwen3-MoE family profile covers the pinned 61,064,245,248-byte source and
-  all 6,144 possible one-expert files under explicit 64 GiB / 8,192-file hard
-  limits. A geometry-only unit test proves the generic Power defaults are too
-  small and the selected profile is sufficient without allocating weights.
+- The Qwen3-MoE family profile covers all 61,066,575,648 bytes in the pinned
+  16 SafeTensor files (61,064,245,248 tensor-payload bytes) and all 6,144
+  possible one-expert files under explicit 64 GiB / 8,192-file hard limits. A
+  geometry-only unit test proves the generic Power defaults are too small and
+  the selected profile is sufficient without allocating weights.
 - Mixed-layer streaming F32 logits, router logits, and exact routes match the
   resident backend within `2e-5`; a BF16 packed checkpoint produces identical
   greedy token IDs while using one bounded Power host cache.
