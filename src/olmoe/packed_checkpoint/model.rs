@@ -15,6 +15,7 @@ use crate::olmoe::{
     packed_expert_tensor_name, OlmoeConfig, OlmoePackedManifest, OlmoeStreamingModel,
     OlmoeTokenizer, PackedExpertRecord,
 };
+use crate::packing::f32_materialized_bytes;
 use crate::{MoeError, Result};
 
 use super::{CONFIG_FILE, DENSE_DIRECTORY, EXPERT_DIRECTORY, MANIFEST_FILE, TOKENIZER_FILE};
@@ -124,6 +125,13 @@ impl OlmoePackedCheckpoint {
     /// Materializes dense F32 weights on the resolved Power device and
     /// connects streamed experts to the sole Power residency hierarchy.
     pub fn load_streaming(&self, policy: ResidencyPolicy) -> Result<OlmoeStreamingModel> {
+        let fixed_weight_bytes = f32_materialized_bytes(&self.dense_store)?;
+        let hierarchy = WeightHierarchy::new_with_fixed_weight_bytes(
+            Arc::clone(&self.expert_store),
+            self.runtime.clone(),
+            policy,
+            fixed_weight_bytes,
+        )?;
         let mut tensors =
             HashMap::<String, Tensor>::with_capacity(self.dense_store.inventory().len());
         for descriptor in self.dense_store.inventory() {
@@ -135,8 +143,6 @@ impl OlmoePackedCheckpoint {
         }
         let builder =
             VarBuilder::from_tensors(tensors, DType::F32, self.runtime.device().tensor_device());
-        let hierarchy =
-            WeightHierarchy::new(Arc::clone(&self.expert_store), self.runtime.clone(), policy)?;
         OlmoeStreamingModel::load(self.config.clone(), builder, hierarchy)
     }
 

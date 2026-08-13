@@ -204,3 +204,45 @@ fn pack_cli_detects_qwen3_moe_and_emits_a_generic_report() {
     let runtime = EmbeddedRuntime::new(DevicePreference::Cpu, InferenceLimits::default()).unwrap();
     assert!(Qwen3MoePackedCheckpoint::open(packed_path, runtime).is_ok());
 }
+
+#[test]
+fn streaming_load_accounts_for_dense_f32_weights_and_cache_budget() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = write_source(&directory.path().join("source"), DType::BF16);
+    let packed_path = directory.path().join("packed");
+    source
+        .convert_to_packed(
+            &packed_path,
+            &InferenceLimits::default(),
+            Qwen3MoeConversionOptions {
+                experts_per_file: 2,
+                max_buffer_bytes: 2048,
+            },
+        )
+        .unwrap();
+    let baseline = Qwen3MoePackedCheckpoint::open(
+        &packed_path,
+        EmbeddedRuntime::new(DevicePreference::Cpu, InferenceLimits::default()).unwrap(),
+    )
+    .unwrap()
+    .load_cpu_streaming(ResidencyPolicy::default())
+    .unwrap();
+    let fixed_weight_bytes = baseline.hierarchy().fixed_weight_bytes();
+    assert!(fixed_weight_bytes > 0);
+
+    let limits = InferenceLimits {
+        max_resident_weight_bytes: fixed_weight_bytes + 7,
+        ..InferenceLimits::default()
+    };
+    let runtime = EmbeddedRuntime::new(DevicePreference::Cpu, limits).unwrap();
+    let packed = Qwen3MoePackedCheckpoint::open(&packed_path, runtime).unwrap();
+    let error = packed
+        .load_cpu_streaming(ResidencyPolicy {
+            host_cache_bytes: 8,
+            ..ResidencyPolicy::default()
+        })
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("fixed weights and residency budgets"));
+}

@@ -158,6 +158,40 @@ pub(crate) fn descriptor<'a>(store: &'a WeightStore, name: &str) -> Result<&'a T
     })
 }
 
+/// Exact bytes occupied after a validated tensor inventory is materialized as
+/// F32. Dense model weights live outside Power's expert hierarchy, so callers
+/// must include this amount in its fixed-weight admission budget.
+pub(crate) fn f32_materialized_bytes(store: &WeightStore) -> Result<u64> {
+    store.inventory().try_fold(0_u64, |total, descriptor| {
+        let elements = descriptor
+            .shape
+            .iter()
+            .try_fold(1_u64, |product, dimension| {
+                let dimension = u64::try_from(*dimension).map_err(|_| {
+                    MoeError::InvalidTensor(format!(
+                        "dense tensor '{}' dimension exceeds the supported byte range",
+                        descriptor.name
+                    ))
+                })?;
+                product.checked_mul(dimension).ok_or_else(|| {
+                    MoeError::InvalidTensor(format!(
+                        "dense tensor '{}' element count overflowed",
+                        descriptor.name
+                    ))
+                })
+            })?;
+        let bytes = elements.checked_mul(4).ok_or_else(|| {
+            MoeError::InvalidTensor(format!(
+                "dense tensor '{}' F32 byte count overflowed",
+                descriptor.name
+            ))
+        })?;
+        total.checked_add(bytes).ok_or_else(|| {
+            MoeError::InvalidTensor("dense F32 resident byte count overflowed".to_string())
+        })
+    })
+}
+
 pub(crate) fn validate_matrix_descriptor(
     descriptor: &TensorDescriptor,
     rows: usize,

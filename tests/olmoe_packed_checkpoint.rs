@@ -184,6 +184,56 @@ fn conversion_failure_never_publishes_a_partial_destination() {
 }
 
 #[test]
+fn streaming_load_accounts_for_dense_f32_weights_before_materialization() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = write_source_dtype(&directory.path().join("source"), DType::BF16);
+    let packed_path = directory.path().join("packed");
+    source
+        .convert_to_packed(
+            &packed_path,
+            &InferenceLimits::default(),
+            OlmoeConversionOptions {
+                experts_per_file: 2,
+                max_buffer_bytes: 1024 * 1024,
+            },
+        )
+        .unwrap();
+    let packed_bytes = OlmoePackedCheckpoint::open(
+        &packed_path,
+        EmbeddedRuntime::new(DevicePreference::Cpu, InferenceLimits::default()).unwrap(),
+    )
+    .unwrap()
+    .load_cpu_streaming(ResidencyPolicy::default())
+    .unwrap()
+    .hierarchy()
+    .fixed_weight_bytes();
+    let expected_bytes = tiny_weights(&tiny_config())
+        .into_values()
+        .map(|tensor| tensor.elem_count() as u64 * 4)
+        .sum::<u64>()
+        - (tiny_config().num_hidden_layers
+            * tiny_config().num_experts
+            * 3
+            * tiny_config().hidden_size
+            * tiny_config().intermediate_size
+            * 4) as u64;
+    assert_eq!(packed_bytes, expected_bytes);
+
+    let limits = InferenceLimits {
+        max_resident_weight_bytes: expected_bytes - 1,
+        ..InferenceLimits::default()
+    };
+    let runtime = EmbeddedRuntime::new(DevicePreference::Cpu, limits).unwrap();
+    let packed = OlmoePackedCheckpoint::open(&packed_path, runtime).unwrap();
+    let error = packed
+        .load_cpu_streaming(ResidencyPolicy::default())
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("fixed weights and residency budgets"));
+}
+
+#[test]
 fn packed_loader_rejects_manifest_tampering_before_model_load() {
     let directory = tempfile::tempdir().unwrap();
     let source = write_source(&directory.path().join("source"));

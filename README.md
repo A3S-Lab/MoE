@@ -210,7 +210,10 @@ family's 24 GiB state bound covers four complete 32K F32 KV caches (6 GiB
 each). Its entrypoint residency profile also permits one bounded 4 GiB
 current-layer expert union while keeping concurrent reads within 512 MiB; this
 covers all 128 public-model experts in lossless F32 form. Explicit library
-policies are never widened during loading. For example:
+policies are never widened during loading. Before any dense tensor is
+materialized, its exact target F32 size is admitted together with the complete
+host/device expert-cache budgets under Power's resident-weight limit. For
+example:
 
 ```shell
 cargo run --release --bin a3s-moe-pack -- \

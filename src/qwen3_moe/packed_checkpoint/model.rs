@@ -10,6 +10,7 @@ use candle_core::{DType, Tensor};
 use candle_nn::VarBuilder;
 
 use crate::checkpoint::{enforce_metadata_limit, validate_shard_name};
+use crate::packing::f32_materialized_bytes;
 use crate::qwen3_moe::checkpoint::dense_tensor_names;
 use crate::qwen3_moe::{
     Qwen3MoeConfig, Qwen3MoePackedManifest, Qwen3MoeStreamingModel, Qwen3MoeTokenizer,
@@ -118,6 +119,13 @@ impl Qwen3MoePackedCheckpoint {
     /// Materializes dense F32 weights on the resolved Power device and binds
     /// every sparse layer to the checkpoint's sole expert hierarchy.
     pub fn load_streaming(&self, policy: ResidencyPolicy) -> Result<Qwen3MoeStreamingModel> {
+        let fixed_weight_bytes = f32_materialized_bytes(&self.dense_store)?;
+        let hierarchy = WeightHierarchy::new_with_fixed_weight_bytes(
+            Arc::clone(&self.expert_store),
+            self.runtime.clone(),
+            policy,
+            fixed_weight_bytes,
+        )?;
         let mut tensors =
             HashMap::<String, Tensor>::with_capacity(self.dense_store.inventory().len());
         for descriptor in self.dense_store.inventory() {
@@ -129,8 +137,6 @@ impl Qwen3MoePackedCheckpoint {
         }
         let builder =
             VarBuilder::from_tensors(tensors, DType::F32, self.runtime.device().tensor_device());
-        let hierarchy =
-            WeightHierarchy::new(Arc::clone(&self.expert_store), self.runtime.clone(), policy)?;
         Qwen3MoeStreamingModel::load(self.config.clone(), builder, hierarchy)
     }
 

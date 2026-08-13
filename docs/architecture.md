@@ -92,8 +92,12 @@ same bounded range API streams dense tensors larger than the conversion budget
 into valid one-tensor SafeTensor files. The declared buffer limit therefore
 applies without relying on a complete source tensor being smaller than it.
 
-Only `WeightHierarchy` owns resident bytes. Model code may hold short-lived
-views for the current operation but cannot retain a parallel byte cache.
+Only `WeightHierarchy` owns expert-cache resident bytes. The packed loaders
+compute the exact F32 materialized size of the validated dense inventory and
+admit that fixed set together with the complete host/device expert-cache
+budgets against Power's `max_resident_weight_bytes` before loading any dense
+tensor. Model code may hold short-lived views for the current operation but
+cannot retain a parallel byte cache.
 
 ### Confidential checkpoint representation
 

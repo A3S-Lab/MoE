@@ -164,6 +164,10 @@ remains an M6 acceptance item on a confidential-computing host.
   lossless F32 form under a 4 GiB batch limit while retaining a separate 512
   MiB concurrent-read window. A geometry-only test proves the generic 1 GiB
   batch default is insufficient for that valid public-model case.
+- Packed OLMoE and Qwen3-MoE loaders account for the validated dense
+  inventory's target F32 bytes plus both expert-cache tiers before
+  materializing any dense tensor. Tests prove the shared Power resident-weight
+  limit rejects a one-byte cache or fixed-weight overrun.
 - Mixed-layer streaming F32 logits, router logits, and exact routes match the
   resident backend within `2e-5`; a BF16 packed checkpoint produces identical
   greedy token IDs while using one bounded Power host cache.
