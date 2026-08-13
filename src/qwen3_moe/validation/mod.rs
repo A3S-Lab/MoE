@@ -6,7 +6,7 @@ use a3s_power::inference::{
 use candle_core::{Device, Tensor};
 use tokio_util::sync::CancellationToken;
 
-use crate::{MoeError, Result};
+use crate::{MoeArchitecture, MoeError, Result};
 
 use super::{Qwen3MoeCheckpoint, Qwen3MoePackedCheckpoint};
 
@@ -40,7 +40,7 @@ impl Default for Qwen3MoeValidationOptions {
     fn default() -> Self {
         Self {
             tolerances: Qwen3MoeValidationTolerances::default(),
-            inference_limits: InferenceLimits::default(),
+            inference_limits: MoeArchitecture::Qwen3Moe.inference_limits(),
             residency_policy: ResidencyPolicy {
                 host_cache_bytes: DEFAULT_HOST_CACHE_BYTES,
                 max_background_inflight_bytes: DEFAULT_BACKGROUND_BYTES,

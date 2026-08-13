@@ -11,7 +11,7 @@ use a3s_moe::{MoeArchitecture, MoeTokenizer};
 use a3s_power::backend::types::CompletionRequest;
 use a3s_power::backend::Backend;
 use a3s_power::error::Result as PowerResult;
-use a3s_power::inference::{InferenceLimits, PlacementTelemetry, ResidencyPolicy, TelemetryMode};
+use a3s_power::inference::{PlacementTelemetry, ResidencyPolicy, TelemetryMode};
 use a3s_power::model::manifest::ModelManifest;
 use anyhow::{Context, Result};
 use candle_core::{Device, IndexOp, Tensor};
@@ -142,17 +142,16 @@ async fn main() -> Result<()> {
     let prompt_tokens = tokenizer.encode(&args.prompt, true)?;
     let host_cache_bytes = mib(args.host_cache_mib)?;
     let device_cache_bytes = mib(args.device_cache_mib)?;
+    let mut inference_limits = architecture.inference_limits();
+    inference_limits.max_context_tokens = context_length;
+    inference_limits.max_generated_tokens = args.max_tokens as usize;
+    inference_limits.max_concurrent_requests = 1;
+    inference_limits.max_queued_requests = 1;
     let backend = BenchmarkBackend::new(
         architecture,
         MoeBackendConfig {
             device: args.device.preference(),
-            inference_limits: InferenceLimits {
-                max_context_tokens: context_length,
-                max_generated_tokens: args.max_tokens as usize,
-                max_concurrent_requests: 1,
-                max_queued_requests: 1,
-                ..InferenceLimits::default()
-            },
+            inference_limits,
             residency_policy: ResidencyPolicy {
                 host_cache_bytes,
                 device_cache_bytes,

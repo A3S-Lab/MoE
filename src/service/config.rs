@@ -5,7 +5,7 @@ use a3s_power::inference::{
 };
 use serde::Serialize;
 
-use crate::{MoeError, Result};
+use crate::{MoeArchitecture, MoeError, Result};
 
 /// Resource policy for a Power-backed MoE service adapter.
 #[derive(Debug, Clone)]
@@ -19,6 +19,17 @@ pub struct OlmoeBackendConfig {
 }
 
 impl OlmoeBackendConfig {
+    /// Construct a service policy sized for the selected supported family.
+    pub fn for_architecture(architecture: MoeArchitecture) -> Self {
+        let mut inference_limits = architecture.inference_limits();
+        inference_limits.max_concurrent_requests = 4;
+        inference_limits.max_queued_requests = 64;
+        Self {
+            inference_limits,
+            ..Self::default()
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         self.inference_limits.validate()?;
         self.residency_policy.validate()?;
@@ -51,11 +62,9 @@ impl OlmoeBackendConfig {
 
 impl Default for OlmoeBackendConfig {
     fn default() -> Self {
-        let inference_limits = InferenceLimits {
-            max_concurrent_requests: 4,
-            max_queued_requests: 64,
-            ..InferenceLimits::default()
-        };
+        let mut inference_limits = MoeArchitecture::Olmoe.inference_limits();
+        inference_limits.max_concurrent_requests = 4;
+        inference_limits.max_queued_requests = 64;
         Self {
             device: DevicePreference::Cpu,
             inference_limits,

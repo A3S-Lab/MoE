@@ -29,6 +29,13 @@ Dependency direction is one way: `a3s-moe -> a3s-power`. Power never imports a
 model implementation. The `a3s-moe` service binary injects its typed backend
 through `PowerServerBuilder`.
 
+Power's generic default model limits intentionally do not assume a 61 GB
+checkpoint or thousands of physical expert files. `a3s-moe` therefore owns a
+bounded family profile: Qwen3-MoE raises only `max_model_bytes` to 64 GiB and
+`max_model_files` to 8,192. Pack, validation, benchmark, and server entrypoints
+select that profile after bounded architecture detection. Library callers keep
+full control of supplied limits; model loading never silently widens them.
+
 ## Numerical Invariants
 
 OLMoE inference follows the reference order:

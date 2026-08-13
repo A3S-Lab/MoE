@@ -7,7 +7,7 @@ use a3s_moe::service::{MoeBackendConfig, MoeDeviceSpec, OlmoeBackend, Qwen3MoeBa
 use a3s_moe::MoeArchitecture;
 use a3s_power::backend::Backend;
 use a3s_power::config::PowerConfig;
-use a3s_power::inference::{InferenceLimits, ResidencyPolicy, SeekableWeightKey, TelemetryMode};
+use a3s_power::inference::{ResidencyPolicy, SeekableWeightKey, TelemetryMode};
 use a3s_power::server::PowerServerBuilder;
 use anyhow::{bail, Context, Result};
 use clap::Parser;
@@ -117,13 +117,11 @@ async fn main() -> Result<()> {
     power.max_concurrent_requests = u64::try_from(args.max_concurrent_requests)
         .context("max concurrent request count exceeds u64")?;
 
-    let limits = InferenceLimits {
-        max_concurrent_requests: args.max_concurrent_requests,
-        max_queued_requests: args.max_queued_requests,
-        max_context_tokens: args.max_context_tokens,
-        max_generated_tokens: args.max_generated_tokens,
-        ..InferenceLimits::default()
-    };
+    let mut limits = architecture.inference_limits();
+    limits.max_concurrent_requests = args.max_concurrent_requests;
+    limits.max_queued_requests = args.max_queued_requests;
+    limits.max_context_tokens = args.max_context_tokens;
+    limits.max_generated_tokens = args.max_generated_tokens;
     let host_cache_bytes = mib(args.host_cache_mib)?;
     let device_cache_bytes = mib(args.device_cache_mib)?;
     let residency = ResidencyPolicy {

@@ -4,7 +4,6 @@ use std::process::ExitCode;
 use a3s_moe::olmoe::{OlmoeCheckpoint, OlmoeConversionOptions};
 use a3s_moe::qwen3_moe::Qwen3MoeCheckpoint;
 use a3s_moe::{MoeArchitecture, MoeError, Result};
-use a3s_power::inference::InferenceLimits;
 
 const MIB: u64 = 1024 * 1024;
 
@@ -58,17 +57,15 @@ fn run() -> Result<()> {
 
     let source = PathBuf::from(source);
     let destination = PathBuf::from(destination);
-    let report = match MoeArchitecture::detect(&source)? {
-        MoeArchitecture::Olmoe => OlmoeCheckpoint::open(&source)?.convert_to_packed(
-            &destination,
-            &InferenceLimits::default(),
-            options,
-        )?,
-        MoeArchitecture::Qwen3Moe => Qwen3MoeCheckpoint::open(&source)?.convert_to_packed(
-            &destination,
-            &InferenceLimits::default(),
-            options,
-        )?,
+    let architecture = MoeArchitecture::detect(&source)?;
+    let limits = architecture.inference_limits();
+    let report = match architecture {
+        MoeArchitecture::Olmoe => {
+            OlmoeCheckpoint::open(&source)?.convert_to_packed(&destination, &limits, options)?
+        }
+        MoeArchitecture::Qwen3Moe => {
+            Qwen3MoeCheckpoint::open(&source)?.convert_to_packed(&destination, &limits, options)?
+        }
     };
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
