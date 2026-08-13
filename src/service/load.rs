@@ -6,23 +6,24 @@ use a3s_power::error::{PowerError, Result as PowerResult};
 use a3s_power::inference::ExecutionBatchBinding;
 use a3s_power::model::manifest::{ManifestMessage, ModelFormat, ModelManifest, ModelParameters};
 
-use crate::olmoe::{
-    OlmoeConfig, OlmoePackedManifest, OlmoeStreamingModel, OlmoeTokenizer, PackedScalarType,
-};
-use crate::{MoeError, Result};
+use crate::{MoeError, MoeTokenizer, PackedScalarType, Result};
 
 use super::config::OlmoeDeviceSelection;
 use super::source::CheckpointSource;
 
-pub(super) struct LoadedArtifacts {
+#[doc(hidden)]
+pub struct LoadedArtifacts<M> {
     pub canonical_path: PathBuf,
-    pub config: OlmoeConfig,
-    pub packed_manifest: OlmoePackedManifest,
-    pub tokenizer: Arc<OlmoeTokenizer>,
-    pub model: Arc<OlmoeStreamingModel>,
+    pub tokenizer: Arc<MoeTokenizer>,
+    pub model: Arc<M>,
     pub binding: ExecutionBatchBinding,
     pub size: u64,
     pub device: OlmoeDeviceSelection,
+    pub weights_sha256: String,
+    pub scalar_type: PackedScalarType,
+    pub context_length: usize,
+    pub hidden_size: usize,
+    pub eos_token_ids: Vec<u32>,
 }
 
 pub(super) struct LoadSpec {
@@ -35,17 +36,21 @@ pub(super) struct LoadSpec {
     pub messages: Vec<ManifestMessage>,
 }
 
-pub(super) fn power_manifest(spec: &LoadSpec, artifacts: &LoadedArtifacts) -> ModelManifest {
+pub(super) fn power_manifest<M>(
+    spec: &LoadSpec,
+    artifacts: &LoadedArtifacts<M>,
+    family: &str,
+) -> ModelManifest {
     ModelManifest {
         name: spec.name.clone(),
         format: ModelFormat::SafeTensors,
         size: artifacts.size,
-        sha256: artifacts.packed_manifest.weights_sha256(),
+        sha256: artifacts.weights_sha256.clone(),
         parameters: Some(ModelParameters {
-            context_length: u32::try_from(artifacts.config.max_position_embeddings).ok(),
-            embedding_length: u32::try_from(artifacts.config.hidden_size).ok(),
+            context_length: u32::try_from(artifacts.context_length).ok(),
+            embedding_length: u32::try_from(artifacts.hidden_size).ok(),
             parameter_count: None,
-            quantization: Some(match artifacts.packed_manifest.scalar_type {
+            quantization: Some(match artifacts.scalar_type {
                 PackedScalarType::F32 => "F32".to_string(),
                 PackedScalarType::Bf16 => "BF16".to_string(),
             }),
@@ -60,7 +65,7 @@ pub(super) fn power_manifest(spec: &LoadSpec, artifacts: &LoadedArtifacts) -> Mo
         adapter_path: None,
         projector_path: None,
         messages: spec.messages.clone(),
-        family: Some("olmoe".to_string()),
+        family: Some(family.to_string()),
         families: None,
     }
 }
@@ -68,7 +73,7 @@ pub(super) fn power_manifest(spec: &LoadSpec, artifacts: &LoadedArtifacts) -> Mo
 pub(super) fn validate_model_name(name: &str) -> PowerResult<()> {
     if name.trim().is_empty() {
         Err(PowerError::InvalidRequest(
-            "OLMoE model name must not be empty".to_string(),
+            "MoE model name must not be empty".to_string(),
         ))
     } else {
         Ok(())

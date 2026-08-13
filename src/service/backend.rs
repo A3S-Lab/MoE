@@ -16,45 +16,48 @@ use a3s_power::server::request_context::RequestContext;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 
-use crate::olmoe::{OlmoeEncryptedCheckpointSource, OlmoeStreamingModel, OlmoeTokenizer};
-use crate::{MoeError, Result};
+use crate::olmoe::OlmoeEncryptedCheckpointSource;
+use crate::{MoeError, MoeTokenizer, Result};
 
+use super::architecture::{
+    load_olmoe_source, OlmoeServiceArchitecture, Qwen3MoeServiceArchitecture, ServiceArchitecture,
+};
 use super::config::{OlmoeBackendConfig, OlmoeDeviceSelection};
 use super::load::{
-    directory_size, model_load_error, power_manifest, validate_model_name, LoadSpec,
-    LoadedArtifacts,
+    model_load_error, power_manifest, validate_model_name, LoadSpec, LoadedArtifacts,
 };
 use super::request::{prepare_chat, prepare_completion, PromptPolicy};
 use super::source::CheckpointSource;
 use super::stream::CancellableStream;
 use super::worker::GenerationWorker;
 
-const BACKEND_NAME: &str = "a3s-moe-olmoe";
-
-/// Architecture-aware Power backend for packed OLMoE checkpoints.
-pub struct OlmoeBackend {
+/// Architecture-aware Power backend for one packed MoE family.
+pub struct MoeBackend<A: ServiceArchitecture> {
     config: OlmoeBackendConfig,
-    models: RwLock<HashMap<String, Arc<LoadedModel>>>,
+    models: RwLock<HashMap<String, Arc<LoadedModel<A>>>>,
     load_lock: tokio::sync::Mutex<()>,
 }
 
-struct LoadedModel {
+pub type OlmoeBackend = MoeBackend<OlmoeServiceArchitecture>;
+pub type Qwen3MoeBackend = MoeBackend<Qwen3MoeServiceArchitecture>;
+
+struct LoadedModel<A: ServiceArchitecture> {
     manifest: ModelManifest,
     canonical_path: PathBuf,
     trust_anchor: Option<String>,
-    tokenizer: Arc<OlmoeTokenizer>,
-    model: Arc<OlmoeStreamingModel>,
+    tokenizer: Arc<MoeTokenizer>,
+    model: Arc<A::Model>,
     worker: GenerationWorker,
     device: OlmoeDeviceSelection,
 }
 
-impl Drop for LoadedModel {
+impl<A: ServiceArchitecture> Drop for LoadedModel<A> {
     fn drop(&mut self) {
         self.worker.shutdown();
     }
 }
 
-impl OlmoeBackend {
+impl<A: ServiceArchitecture> MoeBackend<A> {
     pub fn new(config: OlmoeBackendConfig) -> Result<Self> {
         config.validate()?;
         Ok(Self {
@@ -84,31 +87,13 @@ impl OlmoeBackend {
         .await
     }
 
-    /// Load a seekable encrypted packed checkpoint using its out-of-band
-    /// manifest digest and zeroizing key owner.
-    pub async fn preload_encrypted(
-        &self,
-        name: impl Into<String>,
-        source: OlmoeEncryptedCheckpointSource,
-        template_override: Option<String>,
-    ) -> PowerResult<ModelManifest> {
-        self.load_spec(LoadSpec {
-            name: name.into(),
-            source: CheckpointSource::Encrypted(source),
-            expected_sha256: None,
-            system_prompt: None,
-            template_override,
-            default_parameters: None,
-            messages: Vec::new(),
-        })
-        .await
-    }
-
     pub fn telemetry(&self, model_name: &str) -> PowerResult<PlacementTelemetry> {
+        use crate::continuous::ContinuousStreamingModel;
         Ok(self.loaded_model(model_name)?.model.telemetry())
     }
 
     pub fn admission_snapshot(&self, model_name: &str) -> PowerResult<AdmissionSnapshot> {
+        use crate::continuous::ContinuousStreamingModel;
         Ok(self
             .loaded_model(model_name)?
             .model
@@ -116,13 +101,11 @@ impl OlmoeBackend {
             .admission_snapshot())
     }
 
-    /// Returns the requested and resolved execution device without exposing
-    /// model inputs, routes, or weight identities.
     pub fn device_selection(&self, model_name: &str) -> PowerResult<OlmoeDeviceSelection> {
         Ok(self.loaded_model(model_name)?.device)
     }
 
-    fn loaded_model(&self, name: &str) -> PowerResult<Arc<LoadedModel>> {
+    fn loaded_model(&self, name: &str) -> PowerResult<Arc<LoadedModel<A>>> {
         read_models(&self.models)
             .get(name)
             .cloned()
@@ -130,6 +113,27 @@ impl OlmoeBackend {
     }
 
     async fn load_spec(&self, spec: LoadSpec) -> PowerResult<ModelManifest> {
+        self.load_spec_with(spec, |source, runtime, residency, device| match source {
+            CheckpointSource::Plain(path) => A::load_plain(path, runtime, residency, device),
+            CheckpointSource::Encrypted(_) => Err(MoeError::InvalidConfig(format!(
+                "{} does not support this encrypted checkpoint source",
+                A::DISPLAY_NAME
+            ))),
+        })
+        .await
+    }
+
+    async fn load_spec_with<F>(&self, spec: LoadSpec, loader: F) -> PowerResult<ModelManifest>
+    where
+        F: FnOnce(
+                CheckpointSource,
+                EmbeddedRuntime,
+                a3s_power::inference::ResidencyPolicy,
+                OlmoeDeviceSelection,
+            ) -> Result<LoadedArtifacts<A::Model>>
+            + Send
+            + 'static,
+    {
         validate_model_name(&spec.name)?;
         if let Some(loaded) = read_models(&self.models).get(&spec.name) {
             validate_existing(loaded, &spec)?;
@@ -154,32 +158,18 @@ impl OlmoeBackend {
                 residency.device_cache_bytes,
             );
             residency.device_cache_bytes = device.effective_device_cache_bytes;
-            let checkpoint = source.open(runtime)?;
-            let tokenizer = Arc::new(checkpoint.load_tokenizer()?);
-            let binding = checkpoint.execution_batch_binding()?;
-            let config = checkpoint.config().clone();
-            let packed_manifest = checkpoint.manifest().clone();
-            let size = directory_size(checkpoint.root())?;
-            let canonical_path = checkpoint.root().to_path_buf();
-            let model = Arc::new(checkpoint.load_streaming(residency)?);
-            Ok::<_, MoeError>(LoadedArtifacts {
-                canonical_path,
-                config,
-                packed_manifest,
-                tokenizer,
-                model,
-                binding,
-                size,
-                device,
-            })
+            loader(source, runtime, residency, device)
         })
         .await
         .map_err(|error| {
-            PowerError::InferenceFailed(format!("OLMoE model loading task failed: {error}"))
+            PowerError::InferenceFailed(format!(
+                "{} model loading task failed: {error}",
+                A::DISPLAY_NAME
+            ))
         })?
         .map_err(model_load_error)?;
 
-        let manifest = power_manifest(&spec, &artifacts);
+        let manifest = power_manifest(&spec, &artifacts, A::FAMILY);
         if let Some(expected) = spec.expected_sha256.as_deref() {
             if expected != manifest.sha256 {
                 return Err(PowerError::IntegrityCheckFailed {
@@ -195,6 +185,7 @@ impl OlmoeBackend {
             artifacts.binding,
             self.config.stream_capacity,
             self.config.batch_window,
+            artifacts.eos_token_ids,
         )
         .map_err(model_load_error)?;
         let loaded = Arc::new(LoadedModel {
@@ -210,7 +201,7 @@ impl OlmoeBackend {
         Ok(manifest)
     }
 
-    fn prompt_policy<'a>(&self, model: &'a LoadedModel) -> PromptPolicy<'a> {
+    fn prompt_policy<'a>(&self, model: &'a LoadedModel<A>) -> PromptPolicy<'a> {
         PromptPolicy {
             tokenizer: &model.tokenizer,
             template_override: model.manifest.template_override.as_deref(),
@@ -227,14 +218,40 @@ impl OlmoeBackend {
                 .min(self.config.inference_limits.max_context_tokens),
             max_generated_tokens: self.config.inference_limits.max_generated_tokens,
             max_concurrent_requests: self.config.inference_limits.max_concurrent_requests,
+            architecture: A::DISPLAY_NAME,
         }
     }
 }
 
+impl MoeBackend<OlmoeServiceArchitecture> {
+    /// Load a seekable encrypted OLMoE checkpoint with its out-of-band trust
+    /// anchor and zeroizing key owner.
+    pub async fn preload_encrypted(
+        &self,
+        name: impl Into<String>,
+        source: OlmoeEncryptedCheckpointSource,
+        template_override: Option<String>,
+    ) -> PowerResult<ModelManifest> {
+        self.load_spec_with(
+            LoadSpec {
+                name: name.into(),
+                source: CheckpointSource::Encrypted(source),
+                expected_sha256: None,
+                system_prompt: None,
+                template_override,
+                default_parameters: None,
+                messages: Vec::new(),
+            },
+            load_olmoe_source,
+        )
+        .await
+    }
+}
+
 #[async_trait]
-impl Backend for OlmoeBackend {
+impl<A: ServiceArchitecture> Backend for MoeBackend<A> {
     fn name(&self) -> &str {
-        BACKEND_NAME
+        A::BACKEND_NAME
     }
 
     fn supports(&self, format: &ModelFormat) -> bool {
@@ -243,17 +260,19 @@ impl Backend for OlmoeBackend {
 
     fn supports_manifest(&self, manifest: &ModelManifest) -> bool {
         self.supports(&manifest.format)
-            && (manifest.family.as_deref() == Some("olmoe")
+            && (manifest.family.as_deref() == Some(A::FAMILY)
                 || manifest
                     .families
                     .as_ref()
-                    .is_some_and(|families| families.iter().any(|family| family == "olmoe")))
+                    .is_some_and(|families| families.iter().any(|family| family == A::FAMILY)))
     }
 
     async fn load(&self, manifest: &ModelManifest) -> PowerResult<()> {
         if !self.supports_manifest(manifest) {
             return Err(PowerError::InvalidFormat(format!(
-                "backend {BACKEND_NAME} requires a SafeTensors manifest with family 'olmoe'"
+                "backend {} requires a SafeTensors manifest with family '{}'",
+                A::BACKEND_NAME,
+                A::FAMILY
             )));
         }
         self.load_spec(LoadSpec {
@@ -314,7 +333,7 @@ impl Backend for OlmoeBackend {
             self.config.default_max_tokens,
         )?;
         Ok(Some(EffectivePromptDigest::chat_prompt_token_ids(
-            BACKEND_NAME,
+            A::BACKEND_NAME,
             &prepared.prompt_tokens,
         )))
     }
@@ -356,7 +375,7 @@ impl Backend for OlmoeBackend {
             self.config.default_max_tokens,
         )?;
         Ok(Some(EffectivePromptDigest::text_prompt(
-            BACKEND_NAME,
+            A::BACKEND_NAME,
             &request.prompt,
         )))
     }
@@ -366,9 +385,10 @@ impl Backend for OlmoeBackend {
         _model_name: &str,
         _request: EmbeddingRequest,
     ) -> PowerResult<EmbeddingResponse> {
-        Err(PowerError::BackendNotAvailable(
-            "OLMoE is a causal language model and does not expose embeddings".to_string(),
-        ))
+        Err(PowerError::BackendNotAvailable(format!(
+            "{} is a causal language model and does not expose embeddings",
+            A::DISPLAY_NAME
+        )))
     }
 
     async fn cleanup_request(
@@ -380,7 +400,10 @@ impl Backend for OlmoeBackend {
     }
 }
 
-fn validate_existing(loaded: &LoadedModel, spec: &LoadSpec) -> PowerResult<()> {
+fn validate_existing<A: ServiceArchitecture>(
+    loaded: &LoadedModel<A>,
+    spec: &LoadSpec,
+) -> PowerResult<()> {
     let canonical = spec.source.root().canonicalize()?;
     if canonical != loaded.canonical_path {
         return Err(PowerError::InvalidRequest(format!(
@@ -427,26 +450,27 @@ fn validate_existing(loaded: &LoadedModel, spec: &LoadSpec) -> PowerResult<()> {
     Ok(())
 }
 
-fn read_models(
-    models: &RwLock<HashMap<String, Arc<LoadedModel>>>,
-) -> std::sync::RwLockReadGuard<'_, HashMap<String, Arc<LoadedModel>>> {
+fn read_models<A: ServiceArchitecture>(
+    models: &RwLock<HashMap<String, Arc<LoadedModel<A>>>>,
+) -> std::sync::RwLockReadGuard<'_, HashMap<String, Arc<LoadedModel<A>>>> {
     models
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn write_models(
-    models: &RwLock<HashMap<String, Arc<LoadedModel>>>,
-) -> std::sync::RwLockWriteGuard<'_, HashMap<String, Arc<LoadedModel>>> {
+fn write_models<A: ServiceArchitecture>(
+    models: &RwLock<HashMap<String, Arc<LoadedModel<A>>>>,
+) -> std::sync::RwLockWriteGuard<'_, HashMap<String, Arc<LoadedModel<A>>>> {
     models
         .write()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-impl std::fmt::Debug for OlmoeBackend {
+impl<A: ServiceArchitecture> std::fmt::Debug for MoeBackend<A> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("OlmoeBackend")
+            .debug_struct("MoeBackend")
+            .field("architecture", &A::FAMILY)
             .field("config", &self.config)
             .field("loaded_models", &read_models(&self.models).len())
             .finish_non_exhaustive()
@@ -454,23 +478,5 @@ impl std::fmt::Debug for OlmoeBackend {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn manifest_matching_is_architecture_aware() {
-        let backend = OlmoeBackend::new(OlmoeBackendConfig::default()).unwrap();
-        let mut manifest = ModelManifest::remote("test");
-        manifest.format = ModelFormat::SafeTensors;
-        manifest.family = Some("olmoe".to_string());
-        assert!(backend.supports_manifest(&manifest));
-        manifest.family = Some("dense".to_string());
-        assert!(!backend.supports_manifest(&manifest));
-    }
-
-    #[test]
-    fn backend_is_send_and_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<OlmoeBackend>();
-    }
-}
+#[path = "backend_tests.rs"]
+mod tests;

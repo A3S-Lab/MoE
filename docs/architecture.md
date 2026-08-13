@@ -7,9 +7,10 @@ CPU, accelerators, and confidential-computing hosts. It adopts the useful
 Colibri pattern—storage, RAM, and device tiers with just-in-time expert
 movement—without coupling generic Power runtime code to one model family.
 
-The initial model is OLMoE. A second architecture is admitted only after the
-boundary has proven that model-owned semantics can change without modifying
-Power's residency core.
+OLMoE established the first model contract. Qwen3-MoE is the second admitted
+architecture and changes head geometry, routing normalization, expert source
+layout, and the dense/sparse layer schedule without modifying Power's
+residency core.
 
 ## Ownership
 
@@ -172,19 +173,24 @@ milestones reuse the same oracle for batched, streaming, and accelerator paths.
 - Implemented: the model scheduler commits lifecycle metadata before
   publishing continuing KV state, compacts completed/cancelled slots, and
   accepts new members for the next immutable roster.
+- Implemented: an architecture adapter shares the scheduler state machine,
+  sampling, lifecycle, and cancellation logic while OLMoE and Qwen3-MoE retain
+  their own row, route-union, and staging report types. Mixed Qwen layers run
+  dense MLPs per row and union routes only for sparse layers.
 
 ### M4: Service and Performance
 
 - Implemented: an architecture-aware Power `Backend` accepts only
-  `SafeTensors` manifests declaring the `olmoe` family and verifies the packed
-  logical-weight digest before serving.
+  `SafeTensors` manifests declaring its exact `olmoe` or `qwen3_moe` family and
+  verifies the packed logical-weight digest before serving.
 - Implemented: one model worker turns a bounded request channel into M3
   continuous batches. Each request retains independent sampling state,
   incremental decoder state, stop policy, cancellation, and response channel.
 - Implemented: Power owns HTTP/OpenAI framing, authentication, outer
   concurrency limiting, metrics, and process lifecycle. The downstream binary
-  injects the backend and its process-local manifest through
-  `PowerServerBuilder`.
+  detects the bounded checkpoint configuration, injects the corresponding
+  typed backend and its process-local manifest through `PowerServerBuilder`,
+  and rejects encrypted Qwen3-MoE input before loading.
 - Implemented: deterministic temperature, top-p, top-k, min-p, repetition,
   frequency, and presence sampling; stable UTF-8 token streaming; and
   fail-closed unsupported request controls.
@@ -233,8 +239,13 @@ fine-tune. It does not present the base model as instruction-tuned.
   fail closed; and mixed dense/sparse execution shares the resident decoder
   state while every sparse layer uses one Power hierarchy. Tiny F32 forward,
   BF16 generation, exact-route, cache-bound, and CLI auto-detection tests pass.
-- M7 pending implementation and acceptance: add service composition, then pin
-  and run the public Qwen3-MoE checkpoint numerical and performance gates.
+- M7 implemented service path: the shared continuous scheduler preserves
+  architecture-specific route unions, and a typed Qwen3-MoE backend passes
+  concurrent completion/chat generation plus real Power HTTP completion and
+  SSE tests. The server automatically selects the model family from
+  `config.json`.
+- M7 pending acceptance: pin and run the public Qwen3-MoE checkpoint numerical
+  and performance gates.
 
 ## Acceptance Gates
 

@@ -212,7 +212,7 @@ impl Qwen3MoeDenseModel {
     }
 }
 
-pub(super) fn validate_generation_request(
+pub(crate) fn validate_generation_request(
     config: &Qwen3MoeConfig,
     prompt: &[u32],
     max_new_tokens: usize,

@@ -5,8 +5,11 @@
 //! semantics, starting with OLMoE.
 
 mod checkpoint;
+#[doc(hidden)]
+pub mod continuous;
 mod decoder;
 mod error;
+mod family;
 mod matrix;
 pub mod olmoe;
 mod packing;
@@ -18,9 +21,11 @@ mod tokenizer;
 
 pub use decoder::DecoderKvCache;
 pub use error::{MoeError, Result};
+pub use family::MoeArchitecture;
 pub use matrix::Matrix;
 pub use olmoe::{
-    packed_expert_tensor_name, OlmoeStreamingMlp as PowerStreamingMlp,
+    packed_expert_tensor_name, OlmoeSampler as MoeSampler,
+    OlmoeSamplingConfig as MoeSamplingConfig, OlmoeStreamingMlp as PowerStreamingMlp,
     OlmoeStreamingMlpOutput as PowerStreamingMlpOutput, PackedExpertRecord, PackedScalarType,
 };
 pub use packing::{PackedConversionOptions, PackedConversionReport};

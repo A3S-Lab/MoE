@@ -24,8 +24,8 @@ pub struct Qwen3MoeStreamingForwardOutput {
 /// residency hierarchy shared by every sparse layer.
 #[derive(Debug, Clone)]
 pub struct Qwen3MoeStreamingModel {
-    dense: Qwen3MoeDenseModel,
-    sparse_mlps: Vec<Option<PowerStreamingMlp>>,
+    pub(super) dense: Qwen3MoeDenseModel,
+    pub(super) sparse_mlps: Vec<Option<PowerStreamingMlp>>,
     hierarchy: WeightHierarchy,
 }
 

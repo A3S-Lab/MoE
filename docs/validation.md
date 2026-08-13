@@ -148,11 +148,20 @@ remains an M6 acceptance item on a confidential-computing host.
   greedy token IDs while using one bounded Power host cache.
 - The pack CLI detects `qwen3_moe` from the validated source configuration and
   emits the same path-explicit conversion evidence schema as OLMoE.
+- Two Qwen3-MoE sessions with different generation state use the shared fair
+  scheduler, reach a Power admission peak of two, and preserve per-layer
+  sparse route unions while dense layers remain session-local.
+- The typed Qwen3-MoE backend verifies a `qwen3_moe` process-local manifest,
+  streams completion and rendered chat output, exposes the architecture's
+  effective prompt digest, and terminates each stream with a final event.
+- A real server subprocess automatically detects a packed Qwen3-MoE
+  checkpoint and passes Power model listing, non-streaming OpenAI completion,
+  and SSE completion tests using the default `qwen3-moe` model identifier.
 
 These gates accept the resident CPU reference backend, source checkpoint
 loader, tokenizer boundary, packed conversion, and Power-backed expert
-streaming. They do not yet accept Qwen3-MoE service composition or a public
-30B-A3B checkpoint run.
+streaming, continuous batching, and service composition. They do not yet
+accept a public 30B-A3B numerical or performance run.
 
 The benchmark's first generation is application-cold with respect to Power's
 expert cache. Integrity verification may already populate the operating-system

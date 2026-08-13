@@ -6,16 +6,18 @@ model-neutral scheduling, weight residency, integrity, devices, and service
 composition. This crate owns architecture-specific tensor names, layouts,
 routing equations, kernels, KV-cache semantics, tokenization, and generation.
 
-The first supported architecture is
-[OLMoE-1B-7B](https://huggingface.co/allenai/OLMoE-1B-7B-0924): 64 experts per
-layer with 8 selected per token, 7B total parameters, and approximately 1B
-active parameters.
+The supported architectures are
+[OLMoE-1B-7B](https://huggingface.co/allenai/OLMoE-1B-7B-0924) and
+Qwen3-MoE. OLMoE has 64 experts per layer with 8 selected per token, 7B total
+parameters, and approximately 1B active parameters. Qwen3-MoE supplies a
+second, mixed dense/sparse architecture boundary without changing Power's
+model-neutral residency core.
 
 ## Current Status
 
 The M0 numerical contract, resident M1 CPU engine, bounded M2 expert streaming,
-M3 continuous batching path, M4 service path, and M6 encrypted-weight
-foundation are implemented and tested:
+M3 continuous batching path, M4 service path, M6 encrypted-weight foundation,
+and M7 Qwen3-MoE inference/service path are implemented and tested:
 
 - Hugging Face compatible OLMoE configuration parsing and strict geometry
   validation.
@@ -83,6 +85,12 @@ foundation are implemented and tested:
 - A Qwen3-MoE streaming decoder that shares the resident attention, dense MLP,
   normalization, and transactional KV-cache implementation while delegating
   all expert residency to one Power hierarchy.
+- Shared continuous scheduling adapters that retain architecture-specific
+  route-union output types while reusing Power admission, lifecycle,
+  cancellation, sampling, and KV accounting for OLMoE and Qwen3-MoE.
+- A Qwen3-MoE Power backend and server composition path with automatic model
+  family detection, concurrent request batching, OpenAI completion/chat
+  streaming, and the same fail-closed request policy as OLMoE.
 
 The HTTP transport, OpenAI response framing, authentication, rate limiting,
 metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
@@ -198,12 +206,25 @@ cargo run --release --features server --bin a3s-moe-server -- \
   --max-concurrent-requests 4
 ```
 
-The server keeps HTTP concerns in Power and injects both the typed OLMoE
-backend and a process-local manifest. Supported sampling controls are
+The server detects `olmoe` or `qwen3_moe` from the checkpoint's bounded
+`config.json`, injects the corresponding typed backend, and registers a
+process-local manifest. Supported sampling controls are
 `temperature`, `top_p`, `top_k`, `min_p`, `seed`, `repeat_penalty`,
 `repeat_last_n`, `frequency_penalty`, and `presence_penalty`. Unsupported
 modalities, tools, structured output, cross-request KV sessions, and backend
 knobs fail before inference.
+
+Serve a packed Qwen3-MoE checkpoint through the same binary; omitting
+`--model` selects the architecture-specific default `qwen3-moe` identifier:
+
+```shell
+cargo run --release --features server --bin a3s-moe-server -- \
+  /models/Qwen3-30B-A3B-Base-a3s --device cpu \
+  --host-cache-mib 512 --max-concurrent-requests 4
+```
+
+Encrypted service loading currently applies only to the OLMoE confidential
+checkpoint envelope and fails closed for Qwen3-MoE.
 
 Serve the encrypted form by supplying both its pinned trust anchor and the
 environment variable that owns the key:
@@ -277,12 +298,13 @@ python tools/generate_qwen3_moe_full_oracle.py
 ```
 
 M7 now provides resident CPU reference inference, strict Hugging Face
-checkpoint loading, tokenizer integration, fused-checkpoint conversion, and
-Power-backed expert streaming for the second family while reusing Power's
-model-neutral `RoutedExpertBatch`, verified tensor-range I/O, and sole
-residency hierarchy. Service composition and pinned public-model
-numerical/performance acceptance remain pending, so Qwen3-MoE is not yet
-advertised as a production service backend.
+checkpoint loading, tokenizer integration, fused-checkpoint conversion,
+Power-backed expert streaming, route-unioned continuous batching, and Power
+service composition for the second family. It reuses Power's model-neutral
+`RoutedExpertBatch`, verified tensor-range I/O, lifecycle, and sole residency
+hierarchy. Pinned public-model numerical and performance acceptance remain
+pending, so the implementation is not yet presented as a production-accepted
+Qwen3-MoE deployment.
 
 ## License
 

@@ -2,10 +2,10 @@ use a3s_power::backend::chat_template::{format_chat_prompt, ChatTemplateKind};
 use a3s_power::backend::types::{ChatMessage, ChatRequest, CompletionRequest};
 use a3s_power::error::PowerError;
 
-use crate::olmoe::{OlmoeSamplingConfig, OlmoeTokenizer};
+use crate::{MoeSamplingConfig, MoeTokenizer};
 
 pub(crate) struct PromptPolicy<'a> {
-    pub tokenizer: &'a OlmoeTokenizer,
+    pub tokenizer: &'a MoeTokenizer,
     pub template_override: Option<&'a str>,
     pub system_prompt: Option<&'a str>,
     pub manifest_messages: &'a [a3s_power::model::manifest::ManifestMessage],
@@ -13,12 +13,13 @@ pub(crate) struct PromptPolicy<'a> {
     pub max_context_tokens: usize,
     pub max_generated_tokens: usize,
     pub max_concurrent_requests: usize,
+    pub architecture: &'a str,
 }
 
 #[derive(Debug)]
 pub(crate) struct PreparedGeneration {
     pub prompt_tokens: Vec<u32>,
-    pub sampling: OlmoeSamplingConfig,
+    pub sampling: MoeSamplingConfig,
     pub max_new_tokens: usize,
     pub stop: Vec<String>,
 }
@@ -28,7 +29,7 @@ pub(crate) fn prepare_chat(
     request: &ChatRequest,
     default_max_tokens: usize,
 ) -> Result<PreparedGeneration, PowerError> {
-    validate_chat_capabilities(request, policy.max_concurrent_requests)?;
+    validate_chat_capabilities(request, policy.max_concurrent_requests, policy.architecture)?;
     if request.messages.is_empty() {
         return Err(invalid("chat requests require at least one message"));
     }
@@ -64,7 +65,7 @@ pub(crate) fn prepare_completion(
     request: &CompletionRequest,
     default_max_tokens: usize,
 ) -> Result<PreparedGeneration, PowerError> {
-    validate_completion_capabilities(request, policy.max_concurrent_requests)?;
+    validate_completion_capabilities(request, policy.max_concurrent_requests, policy.architecture)?;
     prepare_text(
         policy,
         &request.prompt,
@@ -193,7 +194,7 @@ impl<'a> SamplingFields<'a> {
     }
 }
 
-fn sampling_config(fields: SamplingFields<'_>) -> Result<OlmoeSamplingConfig, PowerError> {
+fn sampling_config(fields: SamplingFields<'_>) -> Result<MoeSamplingConfig, PowerError> {
     let top_k = match fields.top_k.unwrap_or(0) {
         value if value < 0 => return Err(invalid("top_k must be non-negative")),
         value => value as usize,
@@ -203,7 +204,7 @@ fn sampling_config(fields: SamplingFields<'_>) -> Result<OlmoeSamplingConfig, Po
         Some(value) if value >= 0 => Some(value as usize),
         Some(_) => return Err(invalid("repeat_last_n must be -1 or non-negative")),
     };
-    let config = OlmoeSamplingConfig {
+    let config = MoeSamplingConfig {
         temperature: fields.temperature.unwrap_or(1.0),
         top_p: fields.top_p.unwrap_or(1.0),
         top_k,
@@ -223,9 +224,12 @@ fn sampling_config(fields: SamplingFields<'_>) -> Result<OlmoeSamplingConfig, Po
 fn validate_chat_capabilities(
     request: &ChatRequest,
     max_concurrent_requests: usize,
+    architecture: &str,
 ) -> Result<(), PowerError> {
     if request.has_image_inputs() {
-        return Err(invalid("OLMoE does not support image inputs"));
+        return Err(invalid(&format!(
+            "{architecture} does not support image inputs"
+        )));
     }
     if request
         .tools
@@ -234,12 +238,14 @@ fn validate_chat_capabilities(
         || request.tool_choice.is_some()
         || request.parallel_tool_calls.is_some()
     {
-        return Err(invalid("OLMoE does not support tool calling"));
+        return Err(invalid(&format!(
+            "{architecture} does not support tool calling"
+        )));
     }
     if request.response_format.is_some() {
-        return Err(invalid(
-            "OLMoE does not support constrained response formats",
-        ));
+        return Err(invalid(&format!(
+            "{architecture} does not support constrained response formats"
+        )));
     }
     if request.session_id.is_some() {
         return Err(invalid(
@@ -263,24 +269,28 @@ fn validate_chat_capabilities(
         request.use_mlock,
         request.num_parallel,
         max_concurrent_requests,
+        architecture,
     )
 }
 
 fn validate_completion_capabilities(
     request: &CompletionRequest,
     max_concurrent_requests: usize,
+    architecture: &str,
 ) -> Result<(), PowerError> {
     if request
         .images
         .as_ref()
         .is_some_and(|images| !images.is_empty())
     {
-        return Err(invalid("OLMoE does not support image inputs"));
+        return Err(invalid(&format!(
+            "{architecture} does not support image inputs"
+        )));
     }
     if request.response_format.is_some() {
-        return Err(invalid(
-            "OLMoE does not support constrained response formats",
-        ));
+        return Err(invalid(&format!(
+            "{architecture} does not support constrained response formats"
+        )));
     }
     if request.session_id.is_some() || request.context.is_some() {
         return Err(invalid(
@@ -288,9 +298,9 @@ fn validate_completion_capabilities(
         ));
     }
     if request.suffix.is_some() {
-        return Err(invalid(
-            "OLMoE does not support fill-in-the-middle suffixes",
-        ));
+        return Err(invalid(&format!(
+            "{architecture} does not support fill-in-the-middle suffixes"
+        )));
     }
     reject_unsupported_controls(
         request.mirostat,
@@ -309,6 +319,7 @@ fn validate_completion_capabilities(
         request.use_mlock,
         request.num_parallel,
         max_concurrent_requests,
+        architecture,
     )
 }
 
@@ -330,6 +341,7 @@ fn reject_unsupported_controls(
     use_mlock: Option<bool>,
     num_parallel: Option<u32>,
     max_concurrent_requests: usize,
+    architecture: &str,
 ) -> Result<(), PowerError> {
     let unsupported = [
         ("mirostat", mirostat.is_some()),
@@ -358,7 +370,7 @@ fn reject_unsupported_controls(
     }
     if num_parallel.is_some_and(|value| value as usize != max_concurrent_requests) {
         return Err(invalid(&format!(
-            "num_parallel must match the configured OLMoE concurrency {max_concurrent_requests}"
+            "num_parallel must match the configured {architecture} concurrency {max_concurrent_requests}"
         )));
     }
     Ok(())

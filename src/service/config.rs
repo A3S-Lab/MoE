@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::{MoeError, Result};
 
-/// Resource policy for the Power-backed OLMoE service adapter.
+/// Resource policy for a Power-backed MoE service adapter.
 #[derive(Debug, Clone)]
 pub struct OlmoeBackendConfig {
     pub device: DevicePreference,
@@ -67,6 +67,12 @@ impl Default for OlmoeBackendConfig {
     }
 }
 
+/// Architecture-neutral name for the shared service configuration.
+pub type MoeBackendConfig = OlmoeBackendConfig;
+
+/// Qwen3-MoE compatibility name for the shared service configuration.
+pub type Qwen3MoeBackendConfig = OlmoeBackendConfig;
+
 /// Content-free evidence for Power's typed device resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -96,3 +102,9 @@ impl OlmoeDeviceSelection {
         }
     }
 }
+
+/// Architecture-neutral name for resolved service device evidence.
+pub type MoeDeviceSelection = OlmoeDeviceSelection;
+
+/// Qwen3-MoE compatibility name for resolved service device evidence.
+pub type Qwen3MoeDeviceSelection = OlmoeDeviceSelection;

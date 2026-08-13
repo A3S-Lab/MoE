@@ -66,6 +66,12 @@ impl Display for OlmoeDeviceSpec {
     }
 }
 
+/// Architecture-neutral name for the service device argument.
+pub type MoeDeviceSpec = OlmoeDeviceSpec;
+
+/// Qwen3-MoE compatibility name for the service device argument.
+pub type Qwen3MoeDeviceSpec = OlmoeDeviceSpec;
+
 #[cfg(test)]
 mod tests {
     use super::*;

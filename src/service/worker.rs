@@ -8,11 +8,10 @@ use a3s_power::inference::{ExecutionBatchBinding, ExecutionDigest, InferenceLimi
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::olmoe::{
-    OlmoeContinuousBatch, OlmoeContinuousRequest, OlmoeDecodeStream, OlmoeStreamingModel,
-    OlmoeTokenizer,
+use crate::continuous::{
+    ContinuousBatch, ContinuousRequest, ContinuousRowOutput, ContinuousStreamingModel,
 };
-use crate::{MoeError, Result};
+use crate::{MoeDecodeStream, MoeError, MoeTokenizer, Result};
 
 use super::request::PreparedGeneration;
 use super::stream::{GenerationEvent, GenerationHandle};
@@ -38,22 +37,22 @@ struct ActiveJob {
     cancellation: CancellationToken,
     decoder: IncrementalDecoder,
     prompt_tokens: u32,
-    eos_token_id: Option<u32>,
+    eos_token_ids: Vec<u32>,
     first_step: bool,
 }
 
 impl GenerationWorker {
-    pub(crate) fn spawn(
-        model: Arc<OlmoeStreamingModel>,
-        tokenizer: Arc<OlmoeTokenizer>,
+    pub(crate) fn spawn<M: ContinuousStreamingModel>(
+        model: Arc<M>,
+        tokenizer: Arc<MoeTokenizer>,
         binding: ExecutionBatchBinding,
         stream_capacity: usize,
         batch_window: Duration,
+        eos_token_ids: Vec<u32>,
     ) -> Result<Self> {
         let limits = model.runtime().limits().clone();
-        let eos_token_id = model.config().eos_token_id;
         let queue_capacity = limits.max_queued_requests;
-        let batch = OlmoeContinuousBatch::new(model, binding)?;
+        let batch = ContinuousBatch::new(model, binding)?;
         let (requests, receiver) = mpsc::channel(queue_capacity);
         let shutdown = CancellationToken::new();
         tokio::spawn(run_worker(
@@ -63,7 +62,7 @@ impl GenerationWorker {
             shutdown.clone(),
             batch_window,
             limits,
-            eos_token_id,
+            eos_token_ids,
         ));
         Ok(Self {
             requests,
@@ -90,7 +89,7 @@ impl GenerationWorker {
                     maximum: self.queue_capacity,
                 },
                 mpsc::error::TrySendError::Closed(_) => PowerError::BackendNotAvailable(
-                    "the OLMoE generation worker is shutting down".to_string(),
+                    "the MoE generation worker is shutting down".to_string(),
                 ),
             })?;
         Ok(GenerationHandle {
@@ -104,14 +103,14 @@ impl GenerationWorker {
     }
 }
 
-async fn run_worker(
-    batch: OlmoeContinuousBatch,
-    tokenizer: Arc<OlmoeTokenizer>,
+async fn run_worker<M: ContinuousStreamingModel>(
+    batch: ContinuousBatch<M>,
+    tokenizer: Arc<MoeTokenizer>,
     mut requests: mpsc::Receiver<GenerationJob>,
     shutdown: CancellationToken,
     batch_window: Duration,
     limits: InferenceLimits,
-    eos_token_id: Option<u32>,
+    eos_token_ids: Vec<u32>,
 ) {
     let maximum = limits.max_concurrent_requests;
     let mut active = BTreeMap::<String, ActiveJob>::new();
@@ -132,7 +131,15 @@ async fn run_worker(
             };
             match job {
                 Some(job) => {
-                    admit_job(&batch, &tokenizer, &limits, eos_token_id, &mut active, job).await;
+                    admit_job(
+                        &batch,
+                        &tokenizer,
+                        &limits,
+                        &eos_token_ids,
+                        &mut active,
+                        job,
+                    )
+                    .await;
                     if !batch_window.is_zero() && !active.is_empty() {
                         tokio::select! {
                             _ = shutdown.cancelled() => break,
@@ -150,7 +157,15 @@ async fn run_worker(
         while active.len() < maximum {
             match requests.try_recv() {
                 Ok(job) => {
-                    admit_job(&batch, &tokenizer, &limits, eos_token_id, &mut active, job).await
+                    admit_job(
+                        &batch,
+                        &tokenizer,
+                        &limits,
+                        &eos_token_ids,
+                        &mut active,
+                        job,
+                    )
+                    .await
                 }
                 Err(mpsc::error::TryRecvError::Empty) => break,
                 Err(mpsc::error::TryRecvError::Disconnected) => {
@@ -177,15 +192,15 @@ async fn run_worker(
 
     cancel_active(&batch, &mut active);
     if let Err(error) = batch.finish() {
-        tracing::warn!(error = %error, "OLMoE generation lifecycle did not finish cleanly");
+        tracing::warn!(error = %error, "MoE generation lifecycle did not finish cleanly");
     }
 }
 
-async fn admit_job(
-    batch: &OlmoeContinuousBatch,
-    tokenizer: &Arc<OlmoeTokenizer>,
+async fn admit_job<M: ContinuousStreamingModel>(
+    batch: &ContinuousBatch<M>,
+    tokenizer: &Arc<MoeTokenizer>,
     limits: &InferenceLimits,
-    eos_token_id: Option<u32>,
+    eos_token_ids: &[u32],
     active: &mut BTreeMap<String, ActiveJob>,
     job: GenerationJob,
 ) {
@@ -205,21 +220,23 @@ async fn admit_job(
     let member_identifier = format!("a3s-moe-request:{}", job.request_id);
     let state = ExecutionDigest::token_ids(&job.prepared.prompt_tokens);
     let state_identifier = format!("{}:{}", state.sha256, job.request_id);
-    let request = match OlmoeContinuousRequest::for_identifiers(
+    let request = match ContinuousRequest::for_identifiers(
         member_identifier.as_bytes(),
         state_identifier.as_bytes(),
         job.prepared.prompt_tokens,
         job.prepared.max_new_tokens,
-        eos_token_id,
+        None,
         limits,
     ) {
-        Ok(request) => request.with_sampling(job.prepared.sampling),
+        Ok(request) => request
+            .with_sampling(job.prepared.sampling)
+            .with_eos_token_ids(eos_token_ids.to_vec()),
         Err(error) => {
             send_error(&job.output, invalid_generation(error));
             return;
         }
     };
-    let eos_token_id = request.eos_token_id;
+    let eos_token_ids = request.eos_token_ids.clone();
     match batch.admit(request, job.cancellation.clone()).await {
         Ok(member_id) => {
             active.insert(
@@ -229,7 +246,7 @@ async fn admit_job(
                     cancellation: job.cancellation,
                     decoder: IncrementalDecoder::new(Arc::clone(tokenizer), job.prepared.stop),
                     prompt_tokens,
-                    eos_token_id,
+                    eos_token_ids,
                     first_step: true,
                 },
             );
@@ -238,16 +255,16 @@ async fn admit_job(
     }
 }
 
-async fn process_step(
-    batch: &OlmoeContinuousBatch,
+async fn process_step<M: ContinuousStreamingModel>(
+    batch: &ContinuousBatch<M>,
     active: &mut BTreeMap<String, ActiveJob>,
-    rows: Vec<crate::olmoe::OlmoeContinuousRowOutput>,
+    rows: Vec<ContinuousRowOutput<M::RowOutput>>,
     step_duration: Duration,
 ) {
     let mut remove = Vec::new();
     for row in rows {
         let Some(job) = active.get_mut(&row.member_id_sha256) else {
-            tracing::warn!(member = %row.member_id_sha256, "OLMoE worker lost a completed row");
+            tracing::warn!(member = %row.member_id_sha256, "MoE worker lost a completed row");
             continue;
         };
         let first_step = job.first_step;
@@ -266,7 +283,7 @@ async fn process_step(
         };
         let done = row.completed || stop_hit;
         let done_reason = done.then(|| {
-            if stop_hit || job.eos_token_id == Some(row.token_id) {
+            if stop_hit || job.eos_token_ids.contains(&row.token_id) {
                 "stop".to_string()
             } else {
                 "length".to_string()
@@ -293,7 +310,10 @@ async fn process_step(
     }
 }
 
-fn reap_cancelled(batch: &OlmoeContinuousBatch, active: &mut BTreeMap<String, ActiveJob>) {
+fn reap_cancelled<M: ContinuousStreamingModel>(
+    batch: &ContinuousBatch<M>,
+    active: &mut BTreeMap<String, ActiveJob>,
+) {
     let cancelled = active
         .iter()
         .filter(|(_, job)| job.cancellation.is_cancelled() || job.output.is_closed())
@@ -305,8 +325,8 @@ fn reap_cancelled(batch: &OlmoeContinuousBatch, active: &mut BTreeMap<String, Ac
     }
 }
 
-fn fail_active(
-    batch: &OlmoeContinuousBatch,
+fn fail_active<M: ContinuousStreamingModel>(
+    batch: &ContinuousBatch<M>,
     active: &mut BTreeMap<String, ActiveJob>,
     error: MoeError,
 ) {
@@ -320,7 +340,10 @@ fn fail_active(
     }
 }
 
-fn cancel_active(batch: &OlmoeContinuousBatch, active: &mut BTreeMap<String, ActiveJob>) {
+fn cancel_active<M: ContinuousStreamingModel>(
+    batch: &ContinuousBatch<M>,
+    active: &mut BTreeMap<String, ActiveJob>,
+) {
     let members = active.keys().cloned().collect::<Vec<_>>();
     for member in members {
         if let Some(job) = active.remove(&member) {
@@ -349,14 +372,14 @@ fn duration_ns(duration: Duration) -> u64 {
 }
 
 struct IncrementalDecoder {
-    stream: OlmoeDecodeStream,
+    stream: MoeDecodeStream,
     stop: Vec<String>,
     decoded: String,
     emitted: String,
 }
 
 impl IncrementalDecoder {
-    fn new(tokenizer: Arc<OlmoeTokenizer>, stop: Vec<String>) -> Self {
+    fn new(tokenizer: Arc<MoeTokenizer>, stop: Vec<String>) -> Self {
         Self {
             stream: tokenizer.decode_stream(true),
             stop,
@@ -420,7 +443,7 @@ mod tests {
 
     use super::*;
 
-    fn tokenizer(root: &Path) -> Arc<OlmoeTokenizer> {
+    fn tokenizer(root: &Path) -> Arc<MoeTokenizer> {
         let vocab = root.join("vocab.json");
         std::fs::write(
             &vocab,
@@ -436,7 +459,7 @@ mod tests {
         inner.with_pre_tokenizer(Some(Whitespace));
         let path = root.join("tokenizer.json");
         inner.save(&path, false).unwrap();
-        Arc::new(OlmoeTokenizer::from_file(path, 8).unwrap())
+        Arc::new(MoeTokenizer::from_file(path, 8).unwrap())
     }
 
     #[test]

@@ -184,7 +184,7 @@ impl OlmoeDenseModel {
     }
 }
 
-pub(in crate::olmoe) fn validate_generation_request(
+pub(crate) fn validate_generation_request(
     config: &OlmoeConfig,
     prompt: &[u32],
     max_new_tokens: usize,

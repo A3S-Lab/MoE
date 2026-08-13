@@ -34,7 +34,7 @@ pub enum Qwen3MoeTokenIds {
 }
 
 impl Qwen3MoeTokenIds {
-    fn values(&self) -> &[u32] {
+    pub fn values(&self) -> &[u32] {
         match self {
             Self::One(value) => std::slice::from_ref(value),
             Self::Many(values) => values,

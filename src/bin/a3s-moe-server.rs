@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use a3s_moe::olmoe::OlmoeEncryptedCheckpointSource;
-use a3s_moe::service::{OlmoeBackend, OlmoeBackendConfig, OlmoeDeviceSpec};
+use a3s_moe::service::{MoeBackendConfig, MoeDeviceSpec, OlmoeBackend, Qwen3MoeBackend};
+use a3s_moe::MoeArchitecture;
+use a3s_power::backend::Backend;
 use a3s_power::config::PowerConfig;
 use a3s_power::inference::{InferenceLimits, ResidencyPolicy, SeekableWeightKey, TelemetryMode};
 use a3s_power::server::PowerServerBuilder;
@@ -12,14 +14,14 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
-#[command(about = "Serve a packed OLMoE checkpoint through A3S Power")]
+#[command(about = "Serve a packed MoE checkpoint through A3S Power")]
 struct Args {
     /// Self-contained checkpoint created by a3s-moe-pack.
     checkpoint: PathBuf,
 
     /// API model identifier.
-    #[arg(long, default_value = "olmoe")]
-    model: String,
+    #[arg(long)]
+    model: Option<String>,
 
     /// Optional Power ACL configuration.
     #[arg(long)]
@@ -51,7 +53,7 @@ struct Args {
 
     /// Typed execution device: auto, cpu, cuda:<ordinal>, or metal:<ordinal>.
     #[arg(long, default_value = "cpu")]
-    device: OlmoeDeviceSpec,
+    device: MoeDeviceSpec,
 
     /// Power device-tier expert cache bound in MiB.
     #[arg(long, default_value_t = 0)]
@@ -90,6 +92,11 @@ async fn main() -> Result<()> {
         )
         .init();
     let args = Args::parse();
+    let architecture = MoeArchitecture::detect(&args.checkpoint)?;
+    let model_name = args
+        .model
+        .clone()
+        .unwrap_or_else(|| architecture.default_model_name().to_string());
     let mut power = match &args.power_config {
         Some(path) => {
             let path_text = path
@@ -126,14 +133,14 @@ async fn main() -> Result<()> {
         telemetry: TelemetryMode::Aggregate,
         ..ResidencyPolicy::default()
     };
-    let backend = Arc::new(OlmoeBackend::new(OlmoeBackendConfig {
+    let backend_config = MoeBackendConfig {
         device: args.device.preference(),
         inference_limits: limits,
         residency_policy: residency,
         batch_window: Duration::from_millis(args.batch_window_ms),
         default_max_tokens: args.default_max_tokens,
-        ..OlmoeBackendConfig::default()
-    })?);
+        ..MoeBackendConfig::default()
+    };
     let template_override = match args.chat_template {
         Some(path) => Some(
             std::fs::read_to_string(&path)
@@ -141,33 +148,59 @@ async fn main() -> Result<()> {
         ),
         None => None,
     };
-    let manifest = match (args.encrypted_manifest_sha256, args.encrypted_key_env) {
-        (Some(manifest_sha256), Some(key_environment)) => {
-            let key = SeekableWeightKey::from_env(&key_environment)
-                .context("failed to load encrypted checkpoint key")?;
-            let source = OlmoeEncryptedCheckpointSource::new(args.checkpoint, manifest_sha256, key)
-                .context("invalid encrypted checkpoint source")?;
-            backend
-                .preload_encrypted(args.model, source, template_override)
-                .await?
+    let (backend, manifest, device): (Arc<dyn Backend>, _, _) = match architecture {
+        MoeArchitecture::Olmoe => {
+            let backend = Arc::new(OlmoeBackend::new(backend_config)?);
+            let manifest = match (
+                args.encrypted_manifest_sha256.as_deref(),
+                args.encrypted_key_env.as_deref(),
+            ) {
+                (Some(manifest_sha256), Some(key_environment)) => {
+                    let key = SeekableWeightKey::from_env(key_environment)
+                        .context("failed to load encrypted checkpoint key")?;
+                    let source =
+                        OlmoeEncryptedCheckpointSource::new(&args.checkpoint, manifest_sha256, key)
+                            .context("invalid encrypted checkpoint source")?;
+                    backend
+                        .preload_encrypted(&model_name, source, template_override.clone())
+                        .await?
+                }
+                (None, None) => {
+                    backend
+                        .preload(&model_name, &args.checkpoint, template_override.clone())
+                        .await?
+                }
+                _ => bail!(
+                    "--encrypted-manifest-sha256 and --encrypted-key-env must be provided together"
+                ),
+            };
+            let device = backend.device_selection(&manifest.name)?;
+            let backend: Arc<dyn Backend> = backend;
+            (backend, manifest, device)
         }
-        (None, None) => {
-            backend
-                .preload(args.model, args.checkpoint, template_override)
-                .await?
+        MoeArchitecture::Qwen3Moe => {
+            if args.encrypted_manifest_sha256.is_some() || args.encrypted_key_env.is_some() {
+                bail!("encrypted checkpoint loading is currently supported only for OLMoE");
+            }
+            let backend = Arc::new(Qwen3MoeBackend::new(backend_config)?);
+            let manifest = backend
+                .preload(&model_name, &args.checkpoint, template_override)
+                .await?;
+            let device = backend.device_selection(&manifest.name)?;
+            let backend: Arc<dyn Backend> = backend;
+            (backend, manifest, device)
         }
-        _ => bail!("--encrypted-manifest-sha256 and --encrypted-key-env must be provided together"),
     };
-    let device = backend.device_selection(&manifest.name)?;
     tracing::info!(
         model = %manifest.name,
+        architecture = %architecture,
         weights_sha256 = %manifest.sha256,
         size = manifest.size,
         requested_device = %args.device,
         resolved_device = %device.resolved.name(),
         automatic_cpu_fallback = device.automatic_cpu_fallback,
         effective_device_cache_bytes = device.effective_device_cache_bytes,
-        "verified and loaded packed OLMoE model"
+        "verified and loaded packed MoE model"
     );
 
     PowerServerBuilder::new(power)

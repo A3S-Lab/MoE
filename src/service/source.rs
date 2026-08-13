@@ -26,7 +26,7 @@ impl CheckpointSource {
         }
     }
 
-    pub(super) fn open(self, runtime: EmbeddedRuntime) -> Result<OlmoePackedCheckpoint> {
+    pub(super) fn open_olmoe(self, runtime: EmbeddedRuntime) -> Result<OlmoePackedCheckpoint> {
         match self {
             Self::Plain(path) => OlmoePackedCheckpoint::open(path, runtime),
             Self::Encrypted(source) => {

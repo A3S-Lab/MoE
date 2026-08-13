@@ -10,41 +10,43 @@ use a3s_power::inference::{
 use candle_core::{IndexOp, Tensor};
 use tokio_util::sync::CancellationToken;
 
-use crate::olmoe::cpu::validate_generation_request;
-use crate::olmoe::{OlmoeKvCache, OlmoeSampler, OlmoeStreamingBatchRow};
-use crate::{MoeError, Result};
+use crate::{MoeError, MoeSampler, Result};
 
-use super::super::{OlmoeStreamingBatchOutput, OlmoeStreamingModel};
-use super::types::{OlmoeContinuousRequest, OlmoeContinuousRowOutput, OlmoeContinuousStepOutput};
+use super::model::{ContinuousModelOutput, ContinuousStreamingModel};
+use super::types::{ContinuousRequest, ContinuousRowOutput, ContinuousStepOutput};
 
-/// Model-owned continuous greedy batching on Power's fair lifecycle.
+pub type ModelStepOutput<M> = ContinuousStepOutput<
+    <M as ContinuousStreamingModel>::RowOutput,
+    <M as ContinuousStreamingModel>::LayerUnionRoutes,
+    <M as ContinuousStreamingModel>::LayerStaging,
+>;
+
+/// Architecture-neutral continuous batching on Power's fair lifecycle.
 ///
-/// Admissions retain one Power permit until completion or cancellation. Each
-/// step freezes the current fair roster, executes ragged attention with
-/// independent KV caches, stages the exact expert union once per layer, and
-/// commits Power metadata before publishing updated model state.
-#[derive(Clone)]
-pub struct OlmoeContinuousBatch {
-    model: Arc<OlmoeStreamingModel>,
+/// The scheduler owns admission, cancellation, sampling, and atomic state
+/// commits. Its model adapter owns the exact ragged attention and route-union
+/// equations, so adding a model family does not duplicate lifecycle logic.
+pub struct ContinuousBatch<M: ContinuousStreamingModel> {
+    model: Arc<M>,
     lifecycle: ExecutionBatchLifecycle,
-    state: Arc<Mutex<CoordinatorState>>,
+    state: Arc<Mutex<CoordinatorState<M::Cache>>>,
 }
 
-struct CoordinatorState {
+struct CoordinatorState<C> {
     in_step: bool,
-    members: BTreeMap<String, ContinuousMember>,
+    members: BTreeMap<String, ContinuousMember<C>>,
 }
 
 #[derive(Clone)]
-struct ContinuousMember {
+struct ContinuousMember<C> {
     member_id_sha256: String,
     pending_tokens: Vec<u32>,
-    cache: OlmoeKvCache,
+    cache: C,
     generated_tokens: Vec<u32>,
     token_history: Vec<u32>,
-    sampler: OlmoeSampler,
+    sampler: MoeSampler,
     max_new_tokens: usize,
-    eos_token_id: Option<u32>,
+    eos_token_ids: Vec<u32>,
 }
 
 struct PreparedCommit {
@@ -52,8 +54,8 @@ struct PreparedCommit {
     row_metadata: Vec<Option<(u32, bool)>>,
 }
 
-impl OlmoeContinuousBatch {
-    pub fn new(model: Arc<OlmoeStreamingModel>, binding: ExecutionBatchBinding) -> Result<Self> {
+impl<M: ContinuousStreamingModel> ContinuousBatch<M> {
+    pub fn new(model: Arc<M>, binding: ExecutionBatchBinding) -> Result<Self> {
         let lifecycle = model.runtime().execution_batch(binding)?;
         Ok(Self {
             model,
@@ -75,7 +77,7 @@ impl OlmoeContinuousBatch {
 
     pub async fn admit(
         &self,
-        request: OlmoeContinuousRequest,
+        request: ContinuousRequest,
         cancellation: CancellationToken,
     ) -> Result<String> {
         self.validate_request(&request)?;
@@ -97,9 +99,9 @@ impl OlmoeContinuousBatch {
                 cache: self.model.new_cache(),
                 generated_tokens: Vec::with_capacity(request.max_new_tokens),
                 token_history: request.prompt,
-                sampler: OlmoeSampler::new(request.sampling)?,
+                sampler: MoeSampler::new(request.sampling)?,
                 max_new_tokens: request.max_new_tokens,
-                eos_token_id: request.eos_token_id,
+                eos_token_ids: request.eos_token_ids,
             },
         );
         Ok(member_id)
@@ -112,10 +114,7 @@ impl OlmoeContinuousBatch {
         Ok(())
     }
 
-    pub async fn step(
-        &self,
-        cancellation: &CancellationToken,
-    ) -> Result<OlmoeContinuousStepOutput> {
+    pub async fn step(&self, cancellation: &CancellationToken) -> Result<ModelStepOutput<M>> {
         if cancellation.is_cancelled() {
             return Err(MoeError::Power(PowerError::InferenceCancelled));
         }
@@ -146,7 +145,7 @@ impl OlmoeContinuousBatch {
                                     "continuous scheduler lost an active member state".to_string(),
                                 )
                             })?;
-                    if member.cache.position() != snapshot.position() {
+                    if M::cache_position(&member.cache) != snapshot.position() {
                         return Err(MoeError::Inference(
                             "continuous scheduler cache position diverged from Power".to_string(),
                         ));
@@ -218,16 +217,14 @@ impl OlmoeContinuousBatch {
             (step, working, originals, inputs, permit)
         };
 
-        let mut batch_rows = working
+        let caches = working
             .iter_mut()
-            .zip(&inputs)
-            .map(|(member, input)| OlmoeStreamingBatchRow::new(input, &mut member.cache))
+            .map(|member| &mut member.cache)
             .collect::<Vec<_>>();
         let batch = self
             .model
-            .forward_batch(&mut batch_rows, &permit, cancellation)
+            .forward_continuous_batch(&inputs, caches, &permit, cancellation)
             .await;
-        drop(batch_rows);
         let batch = match batch {
             Ok(batch) => batch,
             Err(error) => {
@@ -242,7 +239,7 @@ impl OlmoeContinuousBatch {
             return Err(MoeError::Power(PowerError::InferenceCancelled));
         }
 
-        let prepared = match prepare_commit(&step, &mut working, &batch) {
+        let prepared = match prepare_commit::<M>(&step, &mut working, &batch) {
             Ok(prepared) => prepared,
             Err(error) => {
                 drop(step);
@@ -270,7 +267,7 @@ impl OlmoeContinuousBatch {
             state.in_step = false;
         }
 
-        let OlmoeStreamingBatchOutput {
+        let ContinuousModelOutput {
             rows: batch_rows,
             layer_union_routes,
             layer_staging,
@@ -282,7 +279,7 @@ impl OlmoeContinuousBatch {
             .zip(prepared.row_metadata)
         {
             if let Some((token_id, completed)) = metadata {
-                rows.push(OlmoeContinuousRowOutput {
+                rows.push(ContinuousRowOutput {
                     member_id_sha256: member.member_id_sha256,
                     token_id,
                     completed,
@@ -290,7 +287,7 @@ impl OlmoeContinuousBatch {
                 });
             }
         }
-        Ok(OlmoeContinuousStepOutput {
+        Ok(ContinuousStepOutput {
             rows,
             layer_union_routes,
             layer_staging,
@@ -317,8 +314,9 @@ impl OlmoeContinuousBatch {
         }
     }
 
-    fn validate_request(&self, request: &OlmoeContinuousRequest) -> Result<()> {
-        validate_generation_request(self.model.config(), &request.prompt, request.max_new_tokens)?;
+    fn validate_request(&self, request: &ContinuousRequest) -> Result<()> {
+        self.model
+            .validate_generation(&request.prompt, request.max_new_tokens)?;
         let limits = self.model.runtime().limits();
         if request.max_new_tokens > limits.max_generated_tokens {
             return Err(MoeError::InvalidConfig(format!(
@@ -337,19 +335,22 @@ impl OlmoeContinuousBatch {
                 limits.max_context_tokens
             )));
         }
+        let mut eos_tokens = BTreeSet::new();
         if request
-            .eos_token_id
-            .is_some_and(|token| token as usize >= self.model.config().vocab_size)
+            .eos_token_ids
+            .iter()
+            .any(|token| *token as usize >= self.model.vocab_size() || !eos_tokens.insert(*token))
         {
             return Err(MoeError::InvalidConfig(
-                "continuous request EOS token is outside the vocabulary".to_string(),
+                "continuous request EOS tokens must be unique and inside the vocabulary"
+                    .to_string(),
             ));
         }
         request.sampling.validate()?;
         Ok(())
     }
 
-    fn restore_failed_step(&self, originals: Vec<ContinuousMember>) {
+    fn restore_failed_step(&self, originals: Vec<ContinuousMember<M::Cache>>) {
         let active = self.active_member_ids();
         let mut state = lock(&self.state);
         for member in originals {
@@ -371,21 +372,31 @@ impl OlmoeContinuousBatch {
     }
 }
 
-impl std::fmt::Debug for OlmoeContinuousBatch {
+impl<M: ContinuousStreamingModel> Clone for ContinuousBatch<M> {
+    fn clone(&self) -> Self {
+        Self {
+            model: Arc::clone(&self.model),
+            lifecycle: self.lifecycle.clone(),
+            state: Arc::clone(&self.state),
+        }
+    }
+}
+
+impl<M: ContinuousStreamingModel> std::fmt::Debug for ContinuousBatch<M> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let state = lock(&self.state);
         formatter
-            .debug_struct("OlmoeContinuousBatch")
+            .debug_struct("ContinuousBatch")
             .field("active_members", &self.lifecycle.active_member_count())
             .field("in_step", &state.in_step)
             .finish_non_exhaustive()
     }
 }
 
-fn prepare_commit(
+fn prepare_commit<M: ContinuousStreamingModel>(
     step: &a3s_power::inference::ExecutionBatchStep,
-    working: &mut [ContinuousMember],
-    batch: &OlmoeStreamingBatchOutput,
+    working: &mut [ContinuousMember<M::Cache>],
+    batch: &ContinuousModelOutput<M::RowOutput, M::LayerUnionRoutes, M::LayerStaging>,
 ) -> Result<PreparedCommit> {
     if working.len() != batch.rows.len() || working.len() != step.rows().len() {
         return Err(MoeError::Inference(
@@ -395,25 +406,22 @@ fn prepare_commit(
     let mut outcomes = Vec::new();
     let mut row_metadata = Vec::with_capacity(working.len());
     for (index, (member, output)) in working.iter_mut().zip(&batch.rows).enumerate() {
-        let cancelled = step.rows()[index].cancellation().is_cancelled();
-        if cancelled {
+        if step.rows()[index].cancellation().is_cancelled() {
             row_metadata.push(None);
             continue;
         }
-        let sequence_length = output.logits.dim(1)?;
-        let logits = output
-            .logits
-            .i((0, sequence_length - 1, ..))?
-            .to_vec1::<f32>()?;
+        let logits = M::row_logits(output);
+        let sequence_length = logits.dim(1)?;
+        let logits = logits.i((0, sequence_length - 1, ..))?.to_vec1::<f32>()?;
         let token_id = member.sampler.sample(&logits, &member.token_history)?;
         member.generated_tokens.push(token_id);
         member.token_history.push(token_id);
         member.pending_tokens = vec![token_id];
         let completed = member.generated_tokens.len() >= member.max_new_tokens
-            || member.eos_token_id == Some(token_id);
+            || member.eos_token_ids.contains(&token_id);
         let output_digest = ExecutionDigest::token_ids(&[token_id]);
-        let state_bytes = member.cache.resident_bytes()?;
-        let next_position = member.cache.position();
+        let state_bytes = M::cache_resident_bytes(&member.cache)?;
+        let next_position = M::cache_position(&member.cache);
         let generated = member.generated_tokens.len();
         let outcome = if completed {
             ExecutionBatchRowOutcome::completed(
@@ -441,8 +449,8 @@ fn prepare_commit(
     })
 }
 
-fn synchronize_members(
-    members: &mut BTreeMap<String, ContinuousMember>,
+fn synchronize_members<C>(
+    members: &mut BTreeMap<String, ContinuousMember<C>>,
     lifecycle: &ExecutionBatchLifecycle,
 ) {
     let active = lifecycle
@@ -457,18 +465,4 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn continuous_public_types_are_send_and_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<OlmoeContinuousRequest>();
-        assert_send_sync::<OlmoeContinuousBatch>();
-        assert_send_sync::<OlmoeContinuousRowOutput>();
-        assert_send_sync::<OlmoeContinuousStepOutput>();
-    }
 }

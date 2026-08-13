@@ -15,6 +15,7 @@ pub use crate::{
 };
 pub use checkpoint::OlmoeCheckpoint;
 pub use config::OlmoeConfig;
+pub(crate) use cpu::validate_generation_request;
 pub use cpu::{OlmoeCpuModel, OlmoeForwardOutput, OlmoeKvCache};
 pub use packed_checkpoint::{
     OlmoeConversionOptions, OlmoeConversionReport, OlmoeEncryptedCheckpointSource,
