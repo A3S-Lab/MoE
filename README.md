@@ -67,6 +67,10 @@ foundation are implemented and tested:
   manifest and consumed through the same Power residency hierarchy.
 - An `a3s-moe-encrypt` CLI and typed encrypted service source that keep keys out
   of arguments, logs, model manifests, and decrypted intermediate files.
+- Qwen3-MoE configuration and sparse-layer contracts, including its distinct
+  attention head dimension, sparse/dense layer schedule, normalized top-k
+  policy, and a dependency-free numerical oracle over the shared Power routing
+  boundary.
 
 The HTTP transport, OpenAI response framing, authentication, rate limiting,
 metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
@@ -103,6 +107,8 @@ See [Architecture](docs/architecture.md) for invariants and the delivery plan.
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+python tools/test_generate_public_oracle.py
+python tools/test_generate_qwen3_moe_oracle.py
 ```
 
 Verify the pinned public checkpoint's 3,219 tensor headers without downloading
@@ -240,6 +246,17 @@ The generator prints JSON to stdout and never overwrites the checked fixture.
 Review changes before replacing `tests/fixtures/olmoe_tiny_oracle.json`.
 The same rule applies to `generate_full_model_oracle.py` and its complete
 decoder fixture.
+
+The Qwen3-MoE sparse fixture follows the same review-only workflow:
+
+```shell
+python tools/generate_qwen3_moe_oracle.py
+```
+
+M7 currently proves the second family's configuration, exact routed sparse
+math, and reuse of Power's model-neutral `RoutedExpertBatch`. Its complete
+decoder, fused-checkpoint conversion, streaming model, and service adapter are
+still pending and are not advertised as supported inference yet.
 
 ## License
 

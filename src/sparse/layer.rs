@@ -1,37 +1,37 @@
 use crate::{Matrix, MoeError, Result};
 
-use super::{OlmoeExpertWeights, OlmoeMoeConfig, OlmoeRouter, OlmoeRouterOutput};
+use super::{GatedExpertWeights, MoeLayerConfig, TopKRouter, TopKRouterOutput};
 
-/// Output of one exact OLMoE sparse feed-forward layer.
+/// Output of one exact sparse feed-forward layer.
 #[derive(Debug, Clone)]
-pub struct OlmoeMoeOutput {
+pub struct SparseMoeOutput {
     pub hidden_states: Matrix,
-    pub routing: OlmoeRouterOutput,
+    pub routing: TopKRouterOutput,
 }
 
-/// CPU correctness implementation of one OLMoE sparse feed-forward layer.
+/// CPU correctness implementation of a full-softmax routed sparse layer.
 #[derive(Debug, Clone)]
-pub struct OlmoeMoeLayer {
-    config: OlmoeMoeConfig,
-    router: OlmoeRouter,
-    experts: Vec<OlmoeExpertWeights>,
+pub struct SparseMoeLayer {
+    config: MoeLayerConfig,
+    router: TopKRouter,
+    experts: Vec<GatedExpertWeights>,
 }
 
-impl OlmoeMoeLayer {
+impl SparseMoeLayer {
     pub fn new(
-        config: OlmoeMoeConfig,
+        config: MoeLayerConfig,
         router_weight: Matrix,
-        experts: Vec<OlmoeExpertWeights>,
+        experts: Vec<GatedExpertWeights>,
     ) -> Result<Self> {
         config.validate()?;
         if experts.len() != config.num_experts {
             return Err(MoeError::InvalidTensor(format!(
-                "OLMoE layer requires {} experts, found {}",
+                "sparse layer requires {} experts, found {}",
                 config.num_experts,
                 experts.len()
             )));
         }
-        let router = OlmoeRouter::new(config, router_weight)?;
+        let router = TopKRouter::new(config, router_weight)?;
         Ok(Self {
             config,
             router,
@@ -39,12 +39,12 @@ impl OlmoeMoeLayer {
         })
     }
 
-    pub fn forward(&self, layer: u32, hidden_states: &Matrix) -> Result<OlmoeMoeOutput> {
+    pub fn forward(&self, layer: u32, hidden_states: &Matrix) -> Result<SparseMoeOutput> {
         let routing = self.router.forward(layer, hidden_states)?;
         let mut output = Matrix::zeros(hidden_states.rows(), self.config.hidden_size)?;
 
-        // Power returns the canonical expert union in ascending order. OLMoE's
-        // reference path also executes active experts in ascending expert order.
+        // Power returns the canonical expert union in ascending order. The
+        // reference families execute active experts in that same order.
         for expert in routing.routes.experts() {
             let expert_index = *expert as usize;
             let weights = self.experts.get(expert_index).ok_or_else(|| {
@@ -65,7 +65,7 @@ impl OlmoeMoeLayer {
             }
         }
 
-        Ok(OlmoeMoeOutput {
+        Ok(SparseMoeOutput {
             hidden_states: output,
             routing,
         })
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn applies_router_weight_before_expert_reduction() {
-        let config = OlmoeMoeConfig {
+        let config = MoeLayerConfig {
             hidden_size: 1,
             intermediate_size: 1,
             num_experts: 2,
@@ -88,14 +88,14 @@ mod tests {
             normalize_top_k: false,
         };
         let expert = |down| {
-            OlmoeExpertWeights::new(
+            GatedExpertWeights::new(
                 config,
                 Matrix::new(2, 1, vec![1.0, 1.0]).unwrap(),
                 Matrix::new(1, 1, vec![down]).unwrap(),
             )
             .unwrap()
         };
-        let layer = OlmoeMoeLayer::new(
+        let layer = SparseMoeLayer::new(
             config,
             Matrix::new(2, 1, vec![1.0, -1.0]).unwrap(),
             vec![expert(2.0), expert(100.0)],

@@ -9,7 +9,7 @@
 | M4 Service and performance | In progress | Service, sampling, streaming, and the evidence harness are complete; a representative public-checkpoint artifact remains. |
 | M5 GPU execution | In progress | Device-native graph and explicit fallback evidence are implemented; CUDA/Metal public-checkpoint parity remains. |
 | M6 TEE | In progress | Seekable encrypted records pass bounded-memory, integrity, cancellation, and service tests; attested key release on a real confidential host remains. |
-| M7 Second architecture | Planned | A second MoE family lands without model-specific changes to Power's runtime contracts. |
+| M7 Second architecture | In progress | Qwen3-MoE config and sparse math reuse the unchanged Power route contract; complete decoder, fused-checkpoint streaming, and service acceptance remain. |
 
 Detailed ownership and acceptance rules live in
 [docs/architecture.md](docs/architecture.md).

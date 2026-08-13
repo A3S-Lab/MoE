@@ -2,8 +2,8 @@ use a3s_power::inference::RoutedExpertBatch;
 use candle_core::{DType, Tensor};
 use candle_nn::{Linear, Module, VarBuilder};
 
-use crate::olmoe::router::select_routes;
 use crate::olmoe::{OlmoeConfig, OlmoeMoeConfig};
+use crate::sparse::select_routes;
 use crate::{Matrix, MoeError, Result};
 
 #[derive(Debug, Clone)]

@@ -1,27 +1,26 @@
 mod checkpoint;
 mod config;
 mod cpu;
-mod expert;
-mod layer;
 mod packed_checkpoint;
-mod router;
 mod sampling;
 mod streaming;
 mod tokenizer;
 #[cfg(feature = "validation")]
 mod validation;
 
+pub use crate::{
+    GatedExpertWeights as OlmoeExpertWeights, MoeLayerConfig as OlmoeMoeConfig,
+    SparseMoeLayer as OlmoeMoeLayer, SparseMoeOutput as OlmoeMoeOutput, TopKRouter as OlmoeRouter,
+    TopKRouterOutput as OlmoeRouterOutput,
+};
 pub use checkpoint::OlmoeCheckpoint;
-pub use config::{OlmoeConfig, OlmoeMoeConfig};
+pub use config::OlmoeConfig;
 pub use cpu::{OlmoeCpuModel, OlmoeForwardOutput, OlmoeKvCache};
-pub use expert::OlmoeExpertWeights;
-pub use layer::{OlmoeMoeLayer, OlmoeMoeOutput};
 pub use packed_checkpoint::{
     OlmoeConversionOptions, OlmoeConversionReport, OlmoeEncryptedCheckpointSource,
     OlmoeEncryptedPackedManifest, OlmoePackedCheckpoint, OlmoePackedEncryptionReport,
     OlmoePackedManifest, OLMOE_ENCRYPTED_PACKED_MANIFEST_SCHEMA,
 };
-pub use router::{OlmoeRouter, OlmoeRouterOutput};
 pub use sampling::{OlmoeSampler, OlmoeSamplingConfig};
 pub use streaming::{
     packed_expert_tensor_name, OlmoeContinuousBatch, OlmoeContinuousRequest,

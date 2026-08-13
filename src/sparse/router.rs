@@ -2,24 +2,24 @@ use a3s_power::inference::{RoutedExpert, RoutedExpertBatch};
 
 use crate::{Matrix, MoeError, Result};
 
-use super::OlmoeMoeConfig;
+use super::MoeLayerConfig;
 
-/// Exact OLMoE full-softmax top-k router.
+/// Exact F32 full-softmax top-k router shared by compatible MoE families.
 #[derive(Debug, Clone)]
-pub struct OlmoeRouter {
-    config: OlmoeMoeConfig,
+pub struct TopKRouter {
+    config: MoeLayerConfig,
     weight: Matrix,
 }
 
 /// Router logits and the validated, unmodified Power routing batch.
 #[derive(Debug, Clone)]
-pub struct OlmoeRouterOutput {
+pub struct TopKRouterOutput {
     pub logits: Matrix,
     pub routes: RoutedExpertBatch,
 }
 
-impl OlmoeRouter {
-    pub fn new(config: OlmoeMoeConfig, weight: Matrix) -> Result<Self> {
+impl TopKRouter {
+    pub fn new(config: MoeLayerConfig, weight: Matrix) -> Result<Self> {
         config.validate()?;
         if weight.rows() != config.num_experts || weight.columns() != config.hidden_size {
             return Err(MoeError::InvalidTensor(format!(
@@ -33,7 +33,7 @@ impl OlmoeRouter {
         Ok(Self { config, weight })
     }
 
-    pub fn forward(&self, layer: u32, hidden_states: &Matrix) -> Result<OlmoeRouterOutput> {
+    pub fn forward(&self, layer: u32, hidden_states: &Matrix) -> Result<TopKRouterOutput> {
         if hidden_states.columns() != self.config.hidden_size {
             return Err(MoeError::InvalidTensor(format!(
                 "router input width must be {}, found {}",
@@ -49,7 +49,6 @@ impl OlmoeRouter {
         let mut logits = Vec::with_capacity(logit_count);
         for position in 0..hidden_states.rows() {
             let input = hidden_states.row(position)?;
-            let mut row_logits = Vec::with_capacity(self.config.num_experts);
             for expert in 0..self.config.num_experts {
                 let value = dot(self.weight.row(expert)?, input);
                 if !value.is_finite() {
@@ -57,21 +56,20 @@ impl OlmoeRouter {
                         "router produced a non-finite logit at position {position}, expert {expert}"
                     )));
                 }
-                row_logits.push(value);
+                logits.push(value);
             }
-            logits.extend_from_slice(&row_logits);
         }
 
         let logits = Matrix::new(hidden_states.rows(), self.config.num_experts, logits)?;
         let routes = select_routes(layer, &logits, self.config)?;
-        Ok(OlmoeRouterOutput { logits, routes })
+        Ok(TopKRouterOutput { logits, routes })
     }
 }
 
-pub(super) fn select_routes(
+pub(crate) fn select_routes(
     layer: u32,
     logits: &Matrix,
-    config: OlmoeMoeConfig,
+    config: MoeLayerConfig,
 ) -> Result<RoutedExpertBatch> {
     config.validate()?;
     if logits.columns() != config.num_experts {
@@ -156,8 +154,8 @@ mod tests {
 
     use super::*;
 
-    fn config(normalize_top_k: bool) -> OlmoeMoeConfig {
-        OlmoeMoeConfig {
+    fn config(normalize_top_k: bool) -> MoeLayerConfig {
+        MoeLayerConfig {
             hidden_size: 2,
             intermediate_size: 2,
             num_experts: 3,
@@ -167,37 +165,23 @@ mod tests {
     }
 
     #[test]
-    fn olmoe_default_keeps_full_softmax_probabilities() {
-        let router = OlmoeRouter::new(
-            config(false),
-            Matrix::new(3, 2, vec![1.0, 0.0, 0.0, 1.0, -1.0, 0.0]).unwrap(),
-        )
-        .unwrap();
-        let output = router
-            .forward(4, &Matrix::new(1, 2, vec![1.0, 0.0]).unwrap())
-            .unwrap();
-        let selections = &output.routes.selections()[0];
-
-        assert_eq!(selections[0].expert, 0);
-        assert_eq!(selections[1].expert, 1);
-        assert!(selections.iter().map(|route| route.weight).sum::<f32>() < 1.0);
-        assert_abs_diff_eq!(selections[0].weight, 0.665_240_94, epsilon = 1e-6);
-        assert_abs_diff_eq!(selections[1].weight, 0.244_728_48, epsilon = 1e-6);
-    }
-
-    #[test]
-    fn optional_top_k_normalization_changes_only_selected_weights() {
+    fn can_keep_or_normalize_selected_full_softmax_probabilities() {
         let weight = Matrix::new(3, 2, vec![1.0, 0.0, 0.0, 1.0, -1.0, 0.0]).unwrap();
         let input = Matrix::new(1, 2, vec![1.0, 0.0]).unwrap();
-        let unnormalized = OlmoeRouter::new(config(false), weight.clone())
+        let unnormalized = TopKRouter::new(config(false), weight.clone())
             .unwrap()
-            .forward(0, &input)
+            .forward(4, &input)
             .unwrap();
-        let normalized = OlmoeRouter::new(config(true), weight)
+        let normalized = TopKRouter::new(config(true), weight)
             .unwrap()
-            .forward(0, &input)
+            .forward(4, &input)
             .unwrap();
 
+        let selections = &unnormalized.routes.selections()[0];
+        assert_eq!(selections[0].expert, 0);
+        assert_eq!(selections[1].expert, 1);
+        assert_abs_diff_eq!(selections[0].weight, 0.665_240_94, epsilon = 1e-6);
+        assert_abs_diff_eq!(selections[1].weight, 0.244_728_48, epsilon = 1e-6);
         assert_eq!(unnormalized.logits, normalized.logits);
         assert_abs_diff_eq!(
             normalized.routes.selections()[0]
@@ -212,7 +196,7 @@ mod tests {
     #[test]
     fn equal_probabilities_use_expert_index_as_deterministic_tie_breaker() {
         let router =
-            OlmoeRouter::new(config(false), Matrix::new(3, 2, vec![0.0; 6]).unwrap()).unwrap();
+            TopKRouter::new(config(false), Matrix::new(3, 2, vec![0.0; 6]).unwrap()).unwrap();
         let output = router
             .forward(0, &Matrix::new(1, 2, vec![1.0, 2.0]).unwrap())
             .unwrap();

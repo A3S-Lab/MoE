@@ -113,6 +113,21 @@ These gates validate the software boundary and bounded decrypted buffers. They
 do not claim remote attestation or hardware-isolated execution; that evidence
 remains an M6 acceptance item on a confidential-computing host.
 
+## Qwen3-MoE Contract Gates
+
+- The published 30B-A3B geometry validates an explicit 128-wide attention head
+  even though `hidden_size / num_attention_heads` is 64, preventing OLMoE's
+  attention assumption from leaking into the second family.
+- Sparse schedules reject zero cadence, duplicate/out-of-range dense-only
+  layers, invalid head geometry, and invalid token IDs.
+- A dependency-free fixture covers router logits, normalized selected
+  full-softmax weights, exact expert IDs, fused gate/up ordering, and final
+  weighted hidden states for two positions.
+- The Qwen3-MoE sparse result is expressed directly as Power's unchanged
+  `RoutedExpertBatch`; no model-specific Power type or cache was added.
+
+These are M7 contract gates, not complete Qwen3-MoE inference acceptance.
+
 The benchmark's first generation is application-cold with respect to Power's
 expert cache. Integrity verification may already populate the operating-system
 page cache, so the artifact records that state as uncontrolled rather than

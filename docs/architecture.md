@@ -207,7 +207,14 @@ fine-tune. It does not present the base model as instruction-tuned.
   memory bounds, numerical parity, and service generation are tested.
 - M6 pending acceptance: integrate an attested key-release provider and record
   peak-memory and inference evidence on a real confidential-computing host.
-- Add a second MoE family without changing Power's model-neutral contracts.
+- M7 implemented contract: Qwen3-MoE validates its independent head dimension,
+  sparse/dense layer schedule, MoE-specific intermediate width, and normalized
+  top-k policy. Its sparse layer uses the shared full-softmax router, fused
+  gate/up expert equation, canonical reduction, and unchanged Power
+  `RoutedExpertBatch`, with a dependency-free numerical fixture.
+- M7 pending implementation: add Qwen3-MoE's per-head Q/K normalization,
+  complete decoder and KV cache, fused 3-D checkpoint conversion, Power-backed
+  streaming model, tokenizer, service adapter, and pinned public acceptance.
 
 ## Acceptance Gates
 

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{MoeError, Result};
+use crate::{MoeError, MoeLayerConfig, Result};
 
 fn default_model_type() -> String {
     "olmoe".to_string()
@@ -52,17 +52,6 @@ pub struct OlmoeConfig {
     pub eos_token_id: Option<u32>,
     #[serde(default)]
     pub pad_token_id: Option<u32>,
-}
-
-/// Validated dimensions required by one OLMoE sparse feed-forward layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OlmoeMoeConfig {
-    pub hidden_size: usize,
-    pub intermediate_size: usize,
-    pub num_experts: usize,
-    pub top_k: usize,
-    pub normalize_top_k: bool,
 }
 
 impl OlmoeConfig {
@@ -180,36 +169,15 @@ impl OlmoeConfig {
         Ok(())
     }
 
-    pub fn moe_config(&self) -> Result<OlmoeMoeConfig> {
+    pub fn moe_config(&self) -> Result<MoeLayerConfig> {
         self.validate()?;
-        Ok(OlmoeMoeConfig {
+        Ok(MoeLayerConfig {
             hidden_size: self.hidden_size,
             intermediate_size: self.intermediate_size,
             num_experts: self.num_experts,
             top_k: self.num_experts_per_tok,
             normalize_top_k: self.norm_topk_prob,
         })
-    }
-}
-
-impl OlmoeMoeConfig {
-    pub fn validate(&self) -> Result<()> {
-        if self.hidden_size == 0
-            || self.intermediate_size == 0
-            || self.num_experts == 0
-            || self.top_k == 0
-        {
-            return Err(MoeError::InvalidConfig(
-                "MoE dimensions and top_k must be non-zero".to_string(),
-            ));
-        }
-        if self.top_k > self.num_experts {
-            return Err(MoeError::InvalidConfig(format!(
-                "top_k {} exceeds num_experts {}",
-                self.top_k, self.num_experts
-            )));
-        }
-        Ok(())
     }
 }
 

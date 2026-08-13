@@ -8,8 +8,8 @@ use candle_core::{DType, Tensor};
 use candle_nn::{Linear, Module};
 use tokio_util::sync::CancellationToken;
 
-use crate::olmoe::router::select_routes;
 use crate::olmoe::OlmoeMoeConfig;
+use crate::sparse::select_routes;
 use crate::{Matrix, MoeError, Result};
 
 use super::packed::{packed_expert_tensor_name, PackedExpertRecord};

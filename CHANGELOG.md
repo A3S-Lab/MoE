@@ -48,3 +48,6 @@ All notable changes to this project are documented in this file.
   and encrypted Power service loading without plaintext weight intermediates.
 - Exact official file-size and SHA-256 verification in the public OLMoE oracle
   generator before any model weights are loaded.
+- Architecture-neutral sparse MoE routing/expert primitives plus validated
+  Qwen3-MoE configuration, layer scheduling, compatibility aliases for the
+  OLMoE API, and an independent Qwen3 sparse-layer oracle.

@@ -1,18 +1,18 @@
 use crate::{Matrix, MoeError, Result};
 
-use super::OlmoeMoeConfig;
+use super::MoeLayerConfig;
 
-/// One OLMoE expert with the Hugging Face fused gate/up layout.
+/// One SiLU-gated expert with fused gate rows followed by up rows.
 #[derive(Debug, Clone)]
-pub struct OlmoeExpertWeights {
+pub struct GatedExpertWeights {
     gate_up: Matrix,
     down: Matrix,
     hidden_size: usize,
     intermediate_size: usize,
 }
 
-impl OlmoeExpertWeights {
-    pub fn new(config: OlmoeMoeConfig, gate_up: Matrix, down: Matrix) -> Result<Self> {
+impl GatedExpertWeights {
+    pub fn new(config: MoeLayerConfig, gate_up: Matrix, down: Matrix) -> Result<Self> {
         config.validate()?;
         let expected_gate_up_rows = config
             .intermediate_size
@@ -96,20 +96,17 @@ mod tests {
 
     use super::*;
 
-    fn config() -> OlmoeMoeConfig {
-        OlmoeMoeConfig {
+    #[test]
+    fn fused_gate_up_order_matches_the_reference_equation() {
+        let config = MoeLayerConfig {
             hidden_size: 2,
             intermediate_size: 1,
             num_experts: 1,
             top_k: 1,
             normalize_top_k: false,
-        }
-    }
-
-    #[test]
-    fn fused_gate_up_order_matches_olmoe() {
-        let expert = OlmoeExpertWeights::new(
-            config(),
+        };
+        let expert = GatedExpertWeights::new(
+            config,
             Matrix::new(2, 2, vec![1.0, 0.0, 0.0, 2.0]).unwrap(),
             Matrix::new(2, 1, vec![3.0, -1.0]).unwrap(),
         )
