@@ -6,7 +6,7 @@
 | M1 CPU correctness | In progress | Resident decoder, loader, tokenizer, and KV cache pass tiny oracles; full public-checkpoint parity still required. |
 | M2 Streaming residency | Complete | Exact routed experts execute through the sole Power hierarchy under a measured memory bound. |
 | M3 Continuous batching | Complete | Route-unioned batches retain single-request parity and load each active expert once per step. |
-| M4 Service and performance | Planned | Power backend, OpenAI streaming, chat template, sampling, and reproducible benchmark evidence ship. |
+| M4 Service and performance | In progress | Service, sampling, streaming, and the evidence harness are complete; a representative public-checkpoint artifact remains. |
 | M5 GPU execution | Planned | Accelerator path passes CPU parity with explicit fallback evidence. |
 | M6 TEE | Planned | Seekable encrypted records and confidential execution pass memory, integrity, and cancellation tests. |
 | M7 Second architecture | Planned | A second MoE family lands without model-specific changes to Power's runtime contracts. |

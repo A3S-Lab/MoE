@@ -99,13 +99,6 @@ impl OlmoePackedCheckpoint {
 
     /// Digest-only identity for Power's continuous execution lifecycle.
     pub fn execution_batch_binding(&self) -> Result<ExecutionBatchBinding> {
-        let weights = ExecutionDigest::utf8_text(&format!(
-            "{}\0{}\0{}\0{}",
-            self.manifest.schema,
-            self.manifest.source_weights_sha256,
-            self.manifest.dense_weights_sha256,
-            self.manifest.expert_weights_sha256,
-        ));
         let state_layout = ExecutionDigest::utf8_text(&format!(
             "a3s-moe-olmoe-kv-cache-f32-v1\0{}\0{}\0{}\0{}",
             self.config.num_hidden_layers,
@@ -116,7 +109,7 @@ impl OlmoePackedCheckpoint {
         let scheduler =
             ExecutionDigest::utf8_text("a3s-moe-olmoe-ragged-expert-union-greedy-scheduler-v1");
         Ok(ExecutionBatchBinding::new(
-            weights.sha256,
+            self.manifest.weights_sha256(),
             state_layout.sha256,
             scheduler.sha256,
         )?)

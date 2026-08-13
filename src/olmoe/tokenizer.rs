@@ -11,6 +11,16 @@ pub struct OlmoeTokenizer {
     model_vocab_size: usize,
 }
 
+/// Owned incremental decoder that emits only stable UTF-8 chunks.
+pub struct OlmoeDecodeStream {
+    tokenizer: Tokenizer,
+    ids: Vec<u32>,
+    prefix: String,
+    prefix_index: usize,
+    skip_special_tokens: bool,
+    model_vocab_size: usize,
+}
+
 impl std::fmt::Debug for OlmoeTokenizer {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -76,6 +86,46 @@ impl OlmoeTokenizer {
             .decode(token_ids, skip_special_tokens)
             .map_err(|error| MoeError::Tokenizer(error.to_string()))
     }
+
+    pub fn decode_stream(&self, skip_special_tokens: bool) -> OlmoeDecodeStream {
+        OlmoeDecodeStream {
+            tokenizer: self.inner.clone(),
+            ids: Vec::new(),
+            prefix: String::new(),
+            prefix_index: 0,
+            skip_special_tokens,
+            model_vocab_size: self.model_vocab_size,
+        }
+    }
+}
+
+impl OlmoeDecodeStream {
+    pub fn step(&mut self, token_id: u32) -> Result<Option<String>> {
+        if token_id as usize >= self.model_vocab_size {
+            return Err(MoeError::Tokenizer(
+                "cannot stream an ID outside the model vocabulary".to_string(),
+            ));
+        }
+        tokenizers::tokenizer::step_decode_stream(
+            &self.tokenizer,
+            vec![token_id],
+            self.skip_special_tokens,
+            &mut self.ids,
+            &mut self.prefix,
+            &mut self.prefix_index,
+        )
+        .map_err(|error| MoeError::Tokenizer(error.to_string()))
+    }
+}
+
+impl std::fmt::Debug for OlmoeDecodeStream {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OlmoeDecodeStream")
+            .field("buffered_token_ids", &self.ids.len())
+            .field("skip_special_tokens", &self.skip_special_tokens)
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(test)]
@@ -110,11 +160,16 @@ mod tests {
         assert_eq!(tokens, [1, 2]);
         assert_eq!(tokenizer.decode(&tokens, true).unwrap(), "hello world");
         assert!(tokenizer.decode(&[4], true).is_err());
+        let mut stream = tokenizer.decode_stream(true);
+        assert_eq!(stream.step(1).unwrap().as_deref(), Some("hello"));
+        assert_eq!(stream.step(2).unwrap().as_deref(), Some(" world"));
+        assert!(stream.step(4).is_err());
     }
 
     #[test]
     fn tokenizer_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<OlmoeTokenizer>();
+        assert_send_sync::<OlmoeDecodeStream>();
     }
 }

@@ -14,7 +14,7 @@ active parameters.
 ## Current Status
 
 The M0 numerical contract, resident M1 CPU engine, bounded M2 expert streaming,
-and M3 continuous batching path are implemented and tested:
+M3 continuous batching path, and M4 service path are implemented and tested:
 
 - Hugging Face compatible OLMoE configuration parsing and strict geometry
   validation.
@@ -51,13 +51,26 @@ and M3 continuous batching path are implemented and tested:
 - A fair greedy scheduler built on Power's execution lifecycle, including
   bounded admission, direct cancellation-token reaping, slot compaction,
   exact KV state-byte accounting, and digest-only step/lifecycle evidence.
+- Deterministic per-request sampling with temperature, top-p, top-k, min-p,
+  repeat, frequency, and presence penalties without weakening batched route
+  union semantics.
+- An architecture-aware Power backend, process-local model manifest, bounded
+  service queue, stable incremental UTF-8 decoding, stop-sequence buffering,
+  and cancellation when an HTTP stream is abandoned.
+- A standalone Power-composed server for OpenAI chat and completion endpoints,
+  plus a JSON benchmark that records application-cold and warm generation,
+  TTFT, expert bytes read, cache state, peak RSS, and an isolated resident CPU
+  baseline.
 
-This is a bounded expert-residency engine, not yet a production serving stack.
-Sampling, chat templates, the Power HTTP backend, and performance evidence are
-the next milestones. Dense weights remain resident in the current CPU path.
-The 13.8 GB public checkpoint's metadata contract is verified without
-downloading weight payloads; a full real-checkpoint conversion and numerical
-run remains an M1 acceptance item.
+The HTTP transport, OpenAI response framing, authentication, rate limiting,
+metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
+resident in the current CPU path. The 13.8 GB public checkpoint's metadata
+contract is verified without downloading weight payloads; a full
+real-checkpoint conversion, numerical run, and representative performance
+artifact remain acceptance items. The published OLMoE checkpoint is a base
+model and does not declare a chat template, so the server uses an explicit
+generic transcript unless `--chat-template` is supplied for a compatible
+fine-tune.
 
 ## Architecture Boundary
 
@@ -105,6 +118,39 @@ cargo run --release --bin a3s-moe-pack -- \
 The destination is created only after conversion and digest validation
 complete. The command refuses to overwrite an existing destination and emits a
 JSON conversion report containing the observed peak buffered bytes.
+
+Serve the packed checkpoint through Power's OpenAI-compatible API:
+
+```shell
+cargo run --release --features server --bin a3s-moe-server -- \
+  /models/OLMoE-1B-7B-0924-a3s \
+  --model olmoe-1b-7b --host-cache-mib 512 \
+  --max-concurrent-requests 4
+```
+
+The server keeps HTTP concerns in Power and injects both the typed OLMoE
+backend and a process-local manifest. Supported sampling controls are
+`temperature`, `top_p`, `top_k`, `min_p`, `seed`, `repeat_penalty`,
+`repeat_last_n`, `frequency_penalty`, and `presence_penalty`. Unsupported
+modalities, tools, structured output, cross-request KV sessions, and backend
+knobs fail before inference.
+
+Produce raw, reproducible performance evidence and optionally compare with the
+fully resident CPU path in an isolated child process:
+
+```shell
+cargo run --release --features benchmark --bin a3s-moe-bench -- \
+  /models/OLMoE-1B-7B-0924-a3s \
+  --prompt "Bitcoin is" --max-tokens 32 --warm-samples 5 \
+  --resident-checkpoint /models/OLMoE-1B-7B-0924 \
+  > olmoe-performance.json
+```
+
+The first sample starts with an empty Power expert cache. Warm samples retain
+only the configured bounded cache. The report explicitly labels the operating
+system page cache as uncontrolled; it does not call that condition physical
+cold I/O. See [Performance Evidence](docs/performance.md) for the measurement
+boundary and comparison rules.
 
 Regenerate the tiny oracle only when intentionally changing the pinned model
 contract:

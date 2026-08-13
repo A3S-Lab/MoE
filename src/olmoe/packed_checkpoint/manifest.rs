@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use a3s_power::inference::ExecutionDigest;
+
 use crate::olmoe::PackedScalarType;
 
 /// Integrity-bound metadata for a completed packed OLMoE checkpoint.
@@ -23,4 +25,16 @@ pub struct OlmoePackedManifest {
 
 impl OlmoePackedManifest {
     pub const SCHEMA: &'static str = "a3s.moe.olmoe-packed.v1";
+
+    /// Stable identity of the logical weights, independent of local paths.
+    pub fn weights_sha256(&self) -> String {
+        ExecutionDigest::utf8_text(&format!(
+            "{}\0{}\0{}\0{}",
+            self.schema,
+            self.source_weights_sha256,
+            self.dense_weights_sha256,
+            self.expert_weights_sha256,
+        ))
+        .sha256
+    }
 }

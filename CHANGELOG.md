@@ -28,3 +28,12 @@ All notable changes to this project are documented in this file.
 - Continuous greedy scheduling on Power's fair execution lifecycle with
   cancellation reaping, slot compaction, atomic state publication, and
   digest-only evidence.
+- Deterministic request-local sampling with temperature, top-p, top-k, min-p,
+  repeat, frequency, and presence controls.
+- Stable incremental tokenizer decoding and stop-sequence buffering for
+  streamed output.
+- Architecture-aware `OlmoeBackend`, bounded continuous-batch worker, and
+  `a3s-moe-server` composition through Power's OpenAI-compatible transport.
+- `a3s-moe-bench` JSON evidence for first/warm TTFT and throughput, Power expert
+  I/O/cache telemetry, peak RSS, and an isolated resident CPU baseline.
+- Service, benchmark, and real HTTP subprocess regression coverage.

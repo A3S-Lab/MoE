@@ -10,18 +10,58 @@ readme = "README.md"
 keywords = ["llm", "moe", "inference", "olmoe"]
 categories = ["science"]
 
+[features]
+default = []
+server = [
+    "a3s-power/server",
+    "dep:anyhow",
+    "dep:async-trait",
+    "dep:chrono",
+    "dep:clap",
+    "dep:futures",
+    "dep:tokio",
+    "dep:tokio-stream",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+]
+benchmark = ["server", "dep:libc", "dep:windows-sys"]
+
+[[bin]]
+name = "a3s-moe-server"
+path = "src/bin/a3s-moe-server.rs"
+required-features = ["server"]
+
+[[bin]]
+name = "a3s-moe-bench"
+path = "src/bin/a3s-moe-bench.rs"
+required-features = ["benchmark"]
+
 [dependencies]
-a3s-power = { git = "https://github.com/A3S-Lab/Power.git", rev = "7ce6fa5", default-features = false, features = ["embedded-inference"] }
+a3s-power = { git = "https://github.com/A3S-Lab/Power.git", rev = "f1ec432", default-features = false, features = ["embedded-inference"] }
+anyhow = { version = "1", optional = true }
+async-trait = { version = "0.1", optional = true }
 candle-core = { version = "0.10.2", default-features = false }
 candle-nn = { version = "0.10.2", default-features = false }
+chrono = { version = "0.4", optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
+futures = { version = "0.3", optional = true }
+libc = { version = "0.2", optional = true }
 safetensors = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
 thiserror = "1"
 tokenizers = "0.22.2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"], optional = true }
+tokio-stream = { version = "0.1", optional = true }
 tokio-util = "0.7"
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_ProcessStatus", "Win32_System_Threading"], optional = true }
 
 [dev-dependencies]
 approx = "0.5"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -142,10 +142,30 @@ milestones reuse the same oracle for batched, streaming, and accelerator paths.
 
 ### M4: Service and Performance
 
-- Implement the Power `Backend` adapter and an `a3s-moe` server binary.
-- Add tokenizer/chat-template and OpenAI chat/completions streaming.
-- Publish cold/warm throughput, time-to-first-token, bytes read, and peak RAM
-  against the CPU baseline.
+- Implemented: an architecture-aware Power `Backend` accepts only
+  `SafeTensors` manifests declaring the `olmoe` family and verifies the packed
+  logical-weight digest before serving.
+- Implemented: one model worker turns a bounded request channel into M3
+  continuous batches. Each request retains independent sampling state,
+  incremental decoder state, stop policy, cancellation, and response channel.
+- Implemented: Power owns HTTP/OpenAI framing, authentication, outer
+  concurrency limiting, metrics, and process lifecycle. The downstream binary
+  injects the backend and its process-local manifest through
+  `PowerServerBuilder`.
+- Implemented: deterministic temperature, top-p, top-k, min-p, repetition,
+  frequency, and presence sampling; stable UTF-8 token streaming; and
+  fail-closed unsupported request controls.
+- Implemented: a JSON evidence harness measures application-cold and warm
+  throughput, TTFT, expert storage bytes, cache telemetry, and process peak RSS.
+  The resident CPU baseline runs in a separate child process.
+- Pending acceptance: check in representative evidence from the complete
+  pinned public checkpoint. The harness explicitly does not claim physical
+  cold I/O when the operating-system page cache is uncontrolled.
+
+The official base OLMoE tokenizer configuration declares no chat template.
+The service therefore uses a deterministic generic role transcript by default
+and accepts an explicit Hugging Face compatible Jinja template for a matching
+fine-tune. It does not present the base model as instruction-tuned.
 
 ### M5–M7: Accelerator, TEE, and Second Architecture
 

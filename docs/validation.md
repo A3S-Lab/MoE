@@ -6,8 +6,8 @@
   `918dbf131d0df5b46e3f6e1d96174d62aa4d16d6`
 - OLMoE-1B-7B-0924 checkpoint:
   `6d84c48581ece794365f2b8e9cfb043c68ade9c5`
-- A3S Power composition and packed-record contract:
-  `7ce6fa5`
+- A3S Power composition, process-local manifest, and packed-record contract:
+  `f1ec432`
 
 ## Numerical Gates
 
@@ -50,6 +50,31 @@
 - Lifecycle evidence accounts for three admissions, two completions, one
   cancellation, three committed steps, five processed rows, and zero leaked
   permits in the regression fixture.
+
+## Service Gates
+
+- Greedy remains the default model-level policy, while fixed-seed stochastic
+  requests reproduce identical token IDs across independent runs.
+- Temperature, top-p, top-k, min-p, repetition, frequency, and presence
+  controls are validated before admission; non-finite or invalid values fail
+  closed.
+- Two concurrent backend streams reach a Power admission peak of two and use
+  the M3 continuous scheduler rather than independent generation loops.
+- Dropping a response stream propagates cancellation and releases its model
+  permit before a replacement request completes.
+- Incremental decoding uses the tokenizer's stable streaming decoder and holds
+  possible stop-sequence prefixes until they can be emitted or suppressed.
+- Exact token-ID prompt digests are exposed for rendered chat prompts.
+- A real `a3s-moe-server` subprocess passes model listing, non-streaming OpenAI
+  completion, and SSE completion tests through Power's HTTP router.
+- The benchmark regression validates the versioned JSON schema, TTFT,
+  generated-token count, expert bytes read, cache-state labels, process peak
+  RSS, and token parity with an isolated resident CPU child process.
+
+The benchmark's first generation is application-cold with respect to Power's
+expert cache. Integrity verification may already populate the operating-system
+page cache, so the artifact records that state as uncontrolled rather than
+claiming physical cold storage.
 
 ## Public Checkpoint Metadata
 

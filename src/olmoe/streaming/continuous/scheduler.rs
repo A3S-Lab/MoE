@@ -11,7 +11,7 @@ use candle_core::{IndexOp, Tensor};
 use tokio_util::sync::CancellationToken;
 
 use crate::olmoe::cpu::validate_generation_request;
-use crate::olmoe::{OlmoeKvCache, OlmoeStreamingBatchRow};
+use crate::olmoe::{OlmoeKvCache, OlmoeSampler, OlmoeStreamingBatchRow};
 use crate::{MoeError, Result};
 
 use super::super::{OlmoeStreamingBatchOutput, OlmoeStreamingModel};
@@ -41,6 +41,8 @@ struct ContinuousMember {
     pending_tokens: Vec<u32>,
     cache: OlmoeKvCache,
     generated_tokens: Vec<u32>,
+    token_history: Vec<u32>,
+    sampler: OlmoeSampler,
     max_new_tokens: usize,
     eos_token_id: Option<u32>,
 }
@@ -91,9 +93,11 @@ impl OlmoeContinuousBatch {
             member_id.clone(),
             ContinuousMember {
                 member_id_sha256: member_id.clone(),
-                pending_tokens: request.prompt,
+                pending_tokens: request.prompt.clone(),
                 cache: self.model.new_cache(),
                 generated_tokens: Vec::with_capacity(request.max_new_tokens),
+                token_history: request.prompt,
+                sampler: OlmoeSampler::new(request.sampling)?,
                 max_new_tokens: request.max_new_tokens,
                 eos_token_id: request.eos_token_id,
             },
@@ -341,6 +345,7 @@ impl OlmoeContinuousBatch {
                 "continuous request EOS token is outside the vocabulary".to_string(),
             ));
         }
+        request.sampling.validate()?;
         Ok(())
     }
 
@@ -396,12 +401,13 @@ fn prepare_commit(
             continue;
         }
         let sequence_length = output.logits.dim(1)?;
-        let token_id = output
+        let logits = output
             .logits
             .i((0, sequence_length - 1, ..))?
-            .argmax(0)?
-            .to_scalar::<u32>()?;
+            .to_vec1::<f32>()?;
+        let token_id = member.sampler.sample(&logits, &member.token_history)?;
         member.generated_tokens.push(token_id);
+        member.token_history.push(token_id);
         member.pending_tokens = vec![token_id];
         let completed = member.generated_tokens.len() >= member.max_new_tokens
             || member.eos_token_id == Some(token_id);

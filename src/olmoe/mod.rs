@@ -5,6 +5,7 @@ mod expert;
 mod layer;
 mod packed_checkpoint;
 mod router;
+mod sampling;
 mod streaming;
 mod tokenizer;
 
@@ -17,6 +18,7 @@ pub use packed_checkpoint::{
     OlmoeConversionOptions, OlmoeConversionReport, OlmoePackedCheckpoint, OlmoePackedManifest,
 };
 pub use router::{OlmoeRouter, OlmoeRouterOutput};
+pub use sampling::{OlmoeSampler, OlmoeSamplingConfig};
 pub use streaming::{
     packed_expert_tensor_name, OlmoeContinuousBatch, OlmoeContinuousRequest,
     OlmoeContinuousRowOutput, OlmoeContinuousStepOutput, OlmoeStreamingBatchOutput,
@@ -24,4 +26,4 @@ pub use streaming::{
     OlmoeStreamingMlp, OlmoeStreamingMlpOutput, OlmoeStreamingModel, PackedExpertRecord,
     PackedScalarType,
 };
-pub use tokenizer::OlmoeTokenizer;
+pub use tokenizer::{OlmoeDecodeStream, OlmoeTokenizer};

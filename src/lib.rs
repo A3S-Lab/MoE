@@ -7,6 +7,8 @@
 mod error;
 mod matrix;
 pub mod olmoe;
+#[cfg(feature = "server")]
+pub mod service;
 
 pub use error::{MoeError, Result};
 pub use matrix::Matrix;

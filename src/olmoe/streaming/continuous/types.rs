@@ -3,7 +3,7 @@ use a3s_power::inference::{
     StagedWeightBatchReport,
 };
 
-use crate::olmoe::OlmoeStreamingBatchRowOutput;
+use crate::olmoe::{OlmoeSamplingConfig, OlmoeStreamingBatchRowOutput};
 use crate::Result;
 
 /// One request admitted to the model-owned continuous greedy scheduler.
@@ -13,6 +13,7 @@ pub struct OlmoeContinuousRequest {
     pub prompt: Vec<u32>,
     pub max_new_tokens: usize,
     pub eos_token_id: Option<u32>,
+    pub sampling: OlmoeSamplingConfig,
 }
 
 impl OlmoeContinuousRequest {
@@ -27,7 +28,13 @@ impl OlmoeContinuousRequest {
             prompt,
             max_new_tokens,
             eos_token_id,
+            sampling: OlmoeSamplingConfig::greedy(),
         }
+    }
+
+    pub fn with_sampling(mut self, sampling: OlmoeSamplingConfig) -> Self {
+        self.sampling = sampling;
+        self
     }
 
     pub fn for_identifiers(
