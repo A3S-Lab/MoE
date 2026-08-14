@@ -1,0 +1,225 @@
+use a3s_power::inference::RoutedExpertBatch;
+use candle_core::{DType, Tensor};
+use candle_nn::{Linear, Module, VarBuilder};
+
+use crate::sparse::select_routes;
+use crate::{Matrix, MoeError, MoeLayerConfig, Result};
+
+use super::Qwen36MoeConfig;
+
+#[derive(Debug, Clone)]
+struct ProjectedMlp {
+    gate: Linear,
+    up: Linear,
+    down: Linear,
+}
+
+impl ProjectedMlp {
+    fn load(hidden_size: usize, intermediate_size: usize, builder: VarBuilder<'_>) -> Result<Self> {
+        Ok(Self {
+            gate: candle_nn::linear_no_bias(
+                hidden_size,
+                intermediate_size,
+                builder.pp("gate_proj"),
+            )?,
+            up: candle_nn::linear_no_bias(hidden_size, intermediate_size, builder.pp("up_proj"))?,
+            down: candle_nn::linear_no_bias(
+                intermediate_size,
+                hidden_size,
+                builder.pp("down_proj"),
+            )?,
+        })
+    }
+
+    fn forward(&self, hidden_states: &Tensor) -> Result<Tensor> {
+        let gate = candle_nn::ops::silu(&self.gate.forward(hidden_states)?)?;
+        Ok(self
+            .down
+            .forward(&gate.mul(&self.up.forward(hidden_states)?)?)?)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct Qwen36SharedExpert {
+    expert: ProjectedMlp,
+    gate: Linear,
+}
+
+impl Qwen36SharedExpert {
+    pub(super) fn load(config: &Qwen36MoeConfig, builder: VarBuilder<'_>) -> Result<Self> {
+        Ok(Self {
+            expert: ProjectedMlp::load(
+                config.hidden_size,
+                config.shared_expert_intermediate_size,
+                builder.pp("shared_expert"),
+            )?,
+            gate: candle_nn::linear_no_bias(
+                config.hidden_size,
+                1,
+                builder.pp("shared_expert_gate"),
+            )?,
+        })
+    }
+
+    pub(super) fn forward(&self, hidden_states: &Tensor) -> Result<Tensor> {
+        Ok(self
+            .expert
+            .forward(hidden_states)?
+            .broadcast_mul(&candle_nn::ops::sigmoid(
+                &self.gate.forward(hidden_states)?,
+            )?)?)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RoutedExpert {
+    gate: Linear,
+    up: Linear,
+    down: Linear,
+}
+
+impl RoutedExpert {
+    fn forward(&self, hidden_states: &Tensor) -> Result<Tensor> {
+        let gate = candle_nn::ops::silu(&self.gate.forward(hidden_states)?)?;
+        Ok(self
+            .down
+            .forward(&gate.mul(&self.up.forward(hidden_states)?)?)?)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct Qwen36ResidentSparseMlp {
+    router: Linear,
+    experts: Vec<RoutedExpert>,
+    config: MoeLayerConfig,
+}
+
+impl Qwen36ResidentSparseMlp {
+    pub(super) fn load(config: &Qwen36MoeConfig, builder: VarBuilder<'_>) -> Result<Self> {
+        let moe = config.moe_config()?;
+        let router =
+            candle_nn::linear_no_bias(config.hidden_size, config.num_experts, builder.pp("gate"))?;
+        let experts_builder = builder.pp("experts");
+        let gate_up_width = config.moe_intermediate_size.checked_mul(2).ok_or_else(|| {
+            MoeError::InvalidConfig("expert gate/up width overflowed".to_string())
+        })?;
+        let gate_up = experts_builder.get(
+            (config.num_experts, gate_up_width, config.hidden_size),
+            "gate_up_proj",
+        )?;
+        let down = experts_builder.get(
+            (
+                config.num_experts,
+                config.hidden_size,
+                config.moe_intermediate_size,
+            ),
+            "down_proj",
+        )?;
+        let mut experts = Vec::with_capacity(config.num_experts);
+        for expert in 0..config.num_experts {
+            let gate_up = gate_up.narrow(0, expert, 1)?.squeeze(0)?;
+            experts.push(RoutedExpert {
+                gate: Linear::new(
+                    gate_up
+                        .narrow(0, 0, config.moe_intermediate_size)?
+                        .contiguous()?,
+                    None,
+                ),
+                up: Linear::new(
+                    gate_up
+                        .narrow(
+                            0,
+                            config.moe_intermediate_size,
+                            config.moe_intermediate_size,
+                        )?
+                        .contiguous()?,
+                    None,
+                ),
+                down: Linear::new(down.narrow(0, expert, 1)?.squeeze(0)?.contiguous()?, None),
+            });
+        }
+        Ok(Self {
+            router,
+            experts,
+            config: moe,
+        })
+    }
+
+    pub(super) fn forward(
+        &self,
+        layer: u32,
+        hidden_states: &Tensor,
+    ) -> Result<Qwen36SparseMlpOutput> {
+        let (batch_size, sequence_length, hidden_size) = hidden_states.dims3()?;
+        let positions = batch_size
+            .checked_mul(sequence_length)
+            .ok_or_else(|| MoeError::InvalidTensor("MoE position count overflowed".to_string()))?;
+        let flattened = hidden_states.reshape((positions, hidden_size))?;
+        let router_logits = self.router.forward(&flattened)?.to_dtype(DType::F32)?;
+        let routes = select_routes(
+            layer,
+            &Matrix::new(
+                positions,
+                self.config.num_experts,
+                router_logits.flatten_all()?.to_vec1::<f32>()?,
+            )?,
+            self.config,
+        )?;
+        let mut output = Tensor::zeros(
+            (positions, hidden_size),
+            hidden_states.dtype(),
+            hidden_states.device(),
+        )?;
+        for expert in routes.experts() {
+            let assignments = routes.assignments(*expert);
+            let indices = Tensor::from_vec(
+                assignments
+                    .iter()
+                    .map(|assignment| {
+                        u32::try_from(assignment.position).map_err(|_| {
+                            MoeError::InvalidTensor(
+                                "MoE position exceeds tensor indexing".to_string(),
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+                assignments.len(),
+                hidden_states.device(),
+            )?;
+            let route_weights = Tensor::from_vec(
+                assignments
+                    .iter()
+                    .map(|assignment| assignment.weight)
+                    .collect::<Vec<_>>(),
+                (assignments.len(), 1),
+                hidden_states.device(),
+            )?
+            .to_dtype(hidden_states.dtype())?;
+            let selected = flattened.index_select(&indices, 0)?;
+            let contribution = self
+                .experts
+                .get(*expert as usize)
+                .ok_or_else(|| {
+                    MoeError::Inference(format!("routed expert {expert} is unavailable"))
+                })?
+                .forward(&selected)?
+                .broadcast_mul(&route_weights)?;
+            output = output.index_add(&indices, &contribution, 0)?;
+        }
+        Ok(Qwen36SparseMlpOutput {
+            hidden_states: output.reshape((batch_size, sequence_length, hidden_size))?,
+            router_logits: router_logits.reshape((
+                batch_size,
+                sequence_length,
+                self.config.num_experts,
+            ))?,
+            routes,
+        })
+    }
+}
+
+pub(super) struct Qwen36SparseMlpOutput {
+    pub hidden_states: Tensor,
+    pub router_logits: Tensor,
+    pub routes: RoutedExpertBatch,
+}

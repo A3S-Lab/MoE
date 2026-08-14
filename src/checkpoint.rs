@@ -186,6 +186,57 @@ impl ShardedSafeTensors {
         }
         Ok(tensors)
     }
+
+    pub(crate) fn load_cpu_selected(&self, names: &[String]) -> Result<HashMap<String, Tensor>> {
+        let selected = names.iter().cloned().collect::<BTreeSet<_>>();
+        if selected.len() != names.len()
+            || selected
+                .iter()
+                .any(|name| !self.weight_map.contains_key(name))
+        {
+            return Err(MoeError::InvalidConfig(
+                "selected SafeTensor names must be unique indexed tensors".to_string(),
+            ));
+        }
+        let mut tensors = HashMap::with_capacity(selected.len());
+        let mut loaded_names = BTreeSet::new();
+        for shard in &self.shards {
+            let shard_name = shard
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    MoeError::InvalidConfig(format!(
+                        "SafeTensor shard '{}' has a non-UTF-8 filename",
+                        shard.display()
+                    ))
+                })?;
+            for (name, tensor) in candle_core::safetensors::load(shard, &Device::Cpu)? {
+                if self.weight_map.get(&name).map(String::as_str) != Some(shard_name) {
+                    return Err(MoeError::InvalidConfig(format!(
+                        "tensor '{name}' is not stored in its index-declared shard"
+                    )));
+                }
+                if !loaded_names.insert(name.clone()) {
+                    return Err(MoeError::InvalidConfig(format!(
+                        "tensor '{name}' occurs in more than one SafeTensor shard"
+                    )));
+                }
+                if selected.contains(&name) {
+                    tensors.insert(name, tensor);
+                }
+            }
+        }
+        if loaded_names.len() != self.weight_map.len() || tensors.len() != selected.len() {
+            return Err(MoeError::InvalidConfig(format!(
+                "loaded {} indexed tensors and {} selected tensors, expected {} and {}",
+                loaded_names.len(),
+                tensors.len(),
+                self.weight_map.len(),
+                selected.len()
+            )));
+        }
+        Ok(tensors)
+    }
 }
 
 fn inventory_error(actual: &BTreeSet<String>, required: &[BTreeSet<String>]) -> MoeError {

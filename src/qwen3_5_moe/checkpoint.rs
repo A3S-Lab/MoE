@@ -1,12 +1,15 @@
 use std::path::{Path, PathBuf};
 
+use candle_core::{DType, Device};
+use candle_nn::VarBuilder;
+
 use crate::checkpoint::{
     enforce_metadata_limit, ShardedSafeTensors, CONFIG_FILE, MAX_CONFIG_BYTES, MAX_TOKENIZER_BYTES,
     TOKENIZER_FILE,
 };
 use crate::{MoeError, MoeTokenizer, Result};
 
-use super::{Qwen36MoeConfig, Qwen36MoeLayerType};
+use super::{Qwen36MoeConfig, Qwen36MoeCpuModel, Qwen36MoeLayerType};
 
 const IGNORED_SOURCE_PREFIXES: &[&str] = &["model.visual.", "mtp."];
 
@@ -57,6 +60,17 @@ impl Qwen36MoeCheckpoint {
         let path = self.root().join(TOKENIZER_FILE);
         enforce_metadata_limit(&path, MAX_TOKENIZER_BYTES, "Qwen3.6-MoE tokenizer")?;
         MoeTokenizer::from_file(path, self.config.vocab_size)
+    }
+
+    /// Loads only the text tensors into the fully resident F32 correctness
+    /// model. Vision and MTP tensors are still authenticated by the index but
+    /// are discarded as each source shard is inspected.
+    pub fn load_cpu_resident(&self) -> Result<Qwen36MoeCpuModel> {
+        let tensors = self
+            .weights
+            .load_cpu_selected(&required_text_tensor_names(&self.config))?;
+        let builder = VarBuilder::from_tensors(tensors, DType::F32, &Device::Cpu);
+        Qwen36MoeCpuModel::load(self.config.clone(), builder)
     }
 }
 
