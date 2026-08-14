@@ -329,16 +329,19 @@ fine-tune. It does not present the base model as instruction-tuned.
   completion/chat/SSE backends, versioned benchmark reports, and an independent
   pinned Transformers F32-operation oracle that captures all vocabulary logits
   and every layer's normalized routes.
-- Public acceptance remains evidence-driven: the exact source checkpoint must
-  pass full-file hashing, conversion, oracle parity, simultaneous real HTTP
-  requests, and cold/warm measurement on the target host before throughput is
-  reported. The current implementation is CPU-only and makes no CUDA-use
-  claim for a present NVIDIA device.
+- Public acceptance is complete: the exact source checkpoint passed full-file
+  hashing, conversion, independent-oracle parity, two simultaneous real HTTP
+  requests, and first/warm measurement on the target host. The checked 4 GiB
+  cache run averaged `0.194616 tokens/s` end to end across three warm samples.
+  The current implementation is CPU-only and makes no CUDA-use claim for the
+  NVIDIA device present in that host.
 
 ## Acceptance Gates
 
-Every optimized path must retain exact expert IDs and match reference route
-weights and logits within a declared dtype-specific tolerance. Tests must cover
+Every optimized path must retain the exact unordered expert set and match
+per-expert route weights and logits within a declared dtype-specific tolerance.
+Rank changes within the selected set are diagnostic because weighted expert
+aggregation is permutation invariant. Tests must cover
 malformed configs, truncated/corrupt weights, cancellation, cache pressure,
 mixed routes, and deterministic fallback. Performance claims require a checked
 benchmark artifact containing hardware, storage cache state, model digest,

@@ -1,0 +1,143 @@
+{
+  "schema": "a3s.moe.qwen3.6-moe-performance.v1",
+  "generatedAt": "2026-08-14T20:51:35.181981800+00:00",
+  "implementation": {
+    "crateName": "a3s-moe",
+    "crateVersion": "0.1.0",
+    "moeRevision": "f844f44a8d8ef3ec55a9e13209bfede765901ad9",
+    "powerRevision": "42c6646",
+    "execution": "f32-dense-power-streamed-experts"
+  },
+  "model": {
+    "name": "qwen3.6-35b-a3b-benchmark",
+    "family": "qwen3_5_moe",
+    "weightsSha256": "3009220dfee6fab4a06ff5161c1b15e4d433a07823dcd7aae4b0e3333ca6ff71",
+    "packedCheckpoint": "qwen3.6-35b-a3b-bf16",
+    "packedBytes": 69335962985
+  },
+  "system": {
+    "os": "windows",
+    "architecture": "x86_64",
+    "logicalParallelism": 20,
+    "processor": "Intel64 Family 6 Model 143 Stepping 8, GenuineIntel"
+  },
+  "configuration": {
+    "promptBytes": 10,
+    "promptTokens": 2,
+    "maxNewTokens": 8,
+    "warmSamples": 3,
+    "temperature": 0.0,
+    "hostCacheBytes": 4294967296,
+    "deviceCacheBytes": 0,
+    "effectiveDeviceCacheBytes": 0,
+    "requestedDevice": {
+      "kind": "cpu"
+    },
+    "resolvedDevice": {
+      "kind": "cpu",
+      "ordinal": null
+    },
+    "automaticCpuFallback": false
+  },
+  "cacheState": {
+    "powerFirstGeneration": "empty expert residency cache",
+    "powerWarmGenerations": "retained bounded expert residency cache",
+    "operatingSystemPageCache": "uncontrolled; checkpoint integrity verification may warm file pages"
+  },
+  "load": {
+    "packedStreamingNs": 107052981200,
+    "residentBaselineNs": null
+  },
+  "firstGeneration": {
+    "totalNs": 49623205800,
+    "timeToFirstTokenNs": 11943136300,
+    "modelPromptEvalNs": 11801165500,
+    "generatedTokens": 8,
+    "tokensPerSecond": 0.16121489676106335,
+    "tokenIds": [
+      264,
+      46362,
+      7143,
+      11085,
+      421,
+      25224,
+      1973,
+      264
+    ],
+    "doneReason": "length"
+  },
+  "warmGenerations": [
+    {
+      "totalNs": 53482396000,
+      "timeToFirstTokenNs": 19157261100,
+      "modelPromptEvalNs": 18995035000,
+      "generatedTokens": 8,
+      "tokensPerSecond": 0.14958192972506318,
+      "tokenIds": [
+        264,
+        46362,
+        7143,
+        11085,
+        421,
+        25224,
+        1973,
+        264
+      ],
+      "doneReason": "length"
+    },
+    {
+      "totalNs": 40463136600,
+      "timeToFirstTokenNs": 8866642300,
+      "modelPromptEvalNs": 8741624100,
+      "generatedTokens": 8,
+      "tokensPerSecond": 0.19771082205228746,
+      "tokenIds": [
+        264,
+        46362,
+        7143,
+        11085,
+        421,
+        25224,
+        1973,
+        264
+      ],
+      "doneReason": "length"
+    },
+    {
+      "totalNs": 33818724700,
+      "timeToFirstTokenNs": 6969498700,
+      "modelPromptEvalNs": 6900298100,
+      "generatedTokens": 8,
+      "tokensPerSecond": 0.23655534237220957,
+      "tokenIds": [
+        264,
+        46362,
+        7143,
+        11085,
+        421,
+        25224,
+        1973,
+        264
+      ],
+      "doneReason": "length"
+    }
+  ],
+  "warmSummary": {
+    "samples": 3,
+    "meanTotalNs": 42588085766.666664,
+    "meanTimeToFirstTokenNs": 11664467366.666666,
+    "meanTokensPerSecond": 0.19461603138318673
+  },
+  "placement": {
+    "firstStorageReads": 1684,
+    "firstStorageBytesRead": 10594919680,
+    "warmStorageReads": 3193,
+    "warmStorageBytesRead": 20088823360,
+    "hostCacheHits": 6479,
+    "hostResidentBytes": 4290816640,
+    "hostEvictions": 4195,
+    "stagedPeakInflightBytes": 25166080
+  },
+  "processPeakRssBytes": 23509303296,
+  "residentBaseline": null
+}

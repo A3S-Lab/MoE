@@ -21,6 +21,11 @@ Throughput divides emitted model tokens by complete request duration. Expert
 storage reads and bytes come from Power placement telemetry, not filesystem
 size estimates.
 
+When a post-first-token decode rate is quoted, it is derived for samples with
+at least two generated tokens as `(generatedTokens - 1) / (total - TTFT)`.
+This secondary value excludes prompt evaluation and the first emitted token;
+the JSON artifact's `tokensPerSecond` remains the primary end-to-end metric.
+
 Peak RSS is a process-lifetime operating-system counter. The streaming process
 is sampled before the resident baseline starts. When requested, the baseline
 runs as a child process so its peak does not include streaming allocations and
@@ -136,3 +141,24 @@ explicitly uncontrolled.
 records two simultaneous one-token OpenAI completion requests through the real
 Power HTTP server with `maxConcurrentRequests = 2`; both completed with the
 same output and no server errors.
+
+[`qwen3.6-35b-a3b-public-cpu-windows.json`](../evidence/qwen3.6-35b-a3b-public-cpu-windows.json)
+records the accepted Qwen3.6-35B-A3B text run on the same 20-logical-core
+Windows x86-64 host. The model revision is
+`995ad96eacd98c81ed38be0c5b274b04031597b0`, the packed text checkpoint is
+69,335,962,985 bytes, and execution is the CPU-only F32 dense plus
+Power-streamed-expert path. With a 4 GiB host cache, the first eight-token
+generation measured `0.161215 tokens/s`; the three warm generations measured
+`0.149582`, `0.197711`, and `0.236555 tokens/s`, for an end-to-end arithmetic
+mean of `0.194616 tokens/s` and mean TTFT of `11.664 s`. Their derived
+post-first-token decode rates were `0.203932`, `0.221544`, and
+`0.260715 tokens/s`, for an arithmetic mean of `0.228730 tokens/s`. Peak RSS was
+23,509,303,296 bytes, host residency was 4,290,816,640 bytes, and staged
+in-flight expert bytes peaked at 25,166,080. The operating-system page cache
+was uncontrolled.
+
+[`qwen3.6-35b-a3b-public-http-windows.json`](../evidence/qwen3.6-35b-a3b-public-http-windows.json)
+records two simultaneous one-token requests through the real Power server.
+Both returned HTTP 200 with identical output in `35.2554197 s`, an aggregate
+completion-token rate of `0.056729 tokens/s`; this is a concurrency smoke
+measurement, not the single-request generation headline.

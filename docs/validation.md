@@ -255,12 +255,19 @@ requests completing with identical one-token output.
 - The Rust validator re-hashes all 34 source files, including the vision and
   MTP shards excluded from the text pack, verifies the packed source/config/
   tokenizer binding, and compares logits, router logits, route weights, expert
-  IDs, and argmax tokens. Provenance rejection and numerical-failure reports
-  are deterministic regression tests.
-- Full public parity and target-host performance are acceptance outputs, not
-  inferred claims. Their checked artifacts are added only after exact weight
-  download, conversion, oracle execution, real concurrent HTTP execution, and
-  release benchmarking complete.
+  sets, route order, and argmax tokens. Route weights are matched by expert ID
+  because the weighted top-k set is permutation invariant; rank-only changes
+  among nearly tied selected experts remain visible as `routeOrderMismatches`
+  and a missing selected expert remains a hard failure. Provenance rejection,
+  route-order invariance, and numerical-failure reports are deterministic
+  regression tests.
+- The pinned public run passed all gates. Across five prompt tokens and all 40
+  layers, 1,600 routes had zero expert-set mismatches, while six near-tied
+  pairs produced 12 rank-only changes. Logits, router logits, and matched route
+  weights had maximum absolute differences of `0.016489983`, `0.018096209`,
+  and `0.0009686351`, respectively, with zero tolerance violations and zero
+  argmax-token mismatches. Checked validation, performance, and concurrent HTTP
+  artifacts live under `evidence/`.
 
 The benchmark's first generation is application-cold with respect to Power's
 expert cache. Integrity verification may already populate the operating-system

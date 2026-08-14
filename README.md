@@ -123,7 +123,18 @@ streaming loader currently requires a CPU Power runtime. It does not advertise
 vision, video, or MTP inference, and it does not claim that a present GPU is
 used. The HTTP transport, OpenAI response framing, authentication, rate limiting,
 metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
-resident in the current CPU path. The complete pinned 13.8 GB OLMoE public
+resident in the current CPU path. The exact pinned Qwen3.6 checkpoint has now
+passed all M8 acceptance gates on the checked 20-logical-core Windows host.
+Its three warm eight-token samples average `0.194616 tokens/s` end to end and
+`11.664 s` TTFT with a 4 GiB Power expert cache; the arithmetic mean of the
+derived post-first-token decode rates is `0.228730 tokens/s`. The checked
+[validation](evidence/qwen3.6-35b-a3b-public-validation.json),
+[performance](evidence/qwen3.6-35b-a3b-public-cpu-windows.json), and
+[two-request HTTP](evidence/qwen3.6-35b-a3b-public-http-windows.json) artifacts
+retain the raw values and exact revisions. These are CPU-path measurements,
+not claims about the host's present RTX 4090.
+
+The complete pinned 13.8 GB OLMoE public
 checkpoint has passed Transformers-to-Rust numerical validation, bounded
 conversion, Power-streamed generation, resident token-parity comparison, and
 real HTTP completion/SSE smoke tests. The published OLMoE checkpoint is a base
@@ -400,8 +411,10 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
 The first sample starts with an empty Power expert cache. Warm samples retain
 only the configured bounded cache. The report explicitly labels the operating
 system page cache as uncontrolled; it does not call that condition physical
-cold I/O. See [Performance Evidence](docs/performance.md) for the measurement
-boundary and comparison rules.
+cold I/O. The checked Qwen3.6 artifact reports `0.161215 tokens/s` for the first
+generation and `0.194616 tokens/s` for the three-sample warm mean. See
+[Performance Evidence](docs/performance.md) for the measurement boundary and
+comparison rules.
 
 CUDA and Metal are mutually platform-specific Cargo features, so portable CI
 uses `--features server,benchmark,validation` rather than `--all-features`.
