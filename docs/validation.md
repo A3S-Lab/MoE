@@ -250,7 +250,8 @@ requests completing with identical one-token output.
   `Qwen3_5MoeForCausalLM`, rejects missing or mismatched text keys, retains
   BF16 storage, and promotes embedding, linear, and depthwise-convolution
   operations to CPU F32. It captures every vocabulary logit and normalized
-  Top-8 route from all layers.
+  Top-8 route from all layers. Its default five-token prompt covers a complete
+  four-token convolution window, and shorter public-oracle prompts fail closed.
 - The Rust validator re-hashes all 34 source files, including the vision and
   MTP shards excluded from the text pack, verifies the packed source/config/
   tokenizer binding, and compares logits, router logits, route weights, expert

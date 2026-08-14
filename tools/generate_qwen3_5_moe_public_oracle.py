@@ -26,7 +26,7 @@ from qwen3_5_moe_public_contract import (
 
 
 ORACLE_SCHEMA = "a3s.moe.qwen3.6-35b-a3b-public-oracle.v1"
-DEFAULT_PROMPT = "Bitcoin is"
+DEFAULT_PROMPT = "Bitcoin is a decentralized network"
 
 
 def parse_args() -> argparse.Namespace:
@@ -146,6 +146,18 @@ def routes_from_logits(
     return output
 
 
+def validate_prompt_coverage(token_ids: list[int], conv_kernel_size: int) -> None:
+    """Require the public oracle to exercise one complete convolution window."""
+    if conv_kernel_size <= 0:
+        raise ValueError("linear convolution kernel size must be greater than zero")
+    if len(token_ids) < conv_kernel_size:
+        raise RuntimeError(
+            "public oracle prompt produced "
+            f"{len(token_ids)} tokens, fewer than the {conv_kernel_size}-token "
+            "linear convolution kernel"
+        )
+
+
 def generate(args: argparse.Namespace) -> dict[str, Any]:
     if args.threads <= 0:
         raise ValueError("--threads must be greater than zero")
@@ -182,6 +194,7 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
     token_ids = [int(token) for token in encoded.input_ids[0].tolist()]
     if not token_ids:
         raise RuntimeError("prompt produced no tokens")
+    validate_prompt_coverage(token_ids, config.linear_conv_kernel_dim)
 
     model, loading_info = Qwen3_5MoeForCausalLM.from_pretrained(
         checkpoint,

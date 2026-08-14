@@ -93,6 +93,13 @@ class Float32OperationTests(unittest.TestCase):
 
 
 class ReferencePolicyTests(unittest.TestCase):
+    def test_public_prompt_covers_a_complete_linear_convolution_window(self) -> None:
+        oracle.validate_prompt_coverage([1, 2, 3, 4], 4)
+        with self.assertRaisesRegex(RuntimeError, "fewer than the 4-token"):
+            oracle.validate_prompt_coverage([1, 2, 3], 4)
+        with self.assertRaisesRegex(ValueError, "greater than zero"):
+            oracle.validate_prompt_coverage([1], 0)
+
     def test_pins_eager_fallbacks_with_bf16_parameter_storage(self) -> None:
         bfloat16 = object()
         options = oracle.transformers_model_options(
