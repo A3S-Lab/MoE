@@ -140,7 +140,23 @@ fn qwen36_validation_cli_reports_passes_and_numerical_failures() {
     assert_eq!(report["linearAttentionLayers"], 3);
     assert_eq!(report["fullAttentionLayers"], 1);
     assert_eq!(report["routesChecked"], 32);
+    assert_eq!(report["routeExpertMismatches"], 0);
+    assert_eq!(report["routeOrderMismatches"], 0);
     assert_eq!(report["sourceWeightsSha256"].as_str().unwrap().len(), 64);
+
+    oracle.output.layer_routes[0][0].swap(0, 1);
+    fs::write(&oracle_path, serde_json::to_vec_pretty(&oracle).unwrap()).unwrap();
+    let reordered = invoke();
+    assert!(
+        reordered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reordered.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&reordered.stdout).unwrap();
+    assert_eq!(report["status"], "passed");
+    assert_eq!(report["routeExpertMismatches"], 0);
+    assert_eq!(report["routeOrderMismatches"], 2);
+    oracle.output.layer_routes[0][0].swap(0, 1);
 
     oracle.model.transformers_source_sha256 = "0".repeat(64);
     fs::write(&oracle_path, serde_json::to_vec_pretty(&oracle).unwrap()).unwrap();

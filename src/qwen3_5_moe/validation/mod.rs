@@ -117,6 +117,7 @@ pub async fn validate_public_checkpoint(
     let mut router_logits = Qwen36MoeNumericComparison::new(options.tolerances.router_logits_abs);
     let mut route_weights = Qwen36MoeNumericComparison::new(options.tolerances.route_weights_abs);
     let mut route_expert_mismatches = 0_u64;
+    let mut route_order_mismatches = 0_u64;
     let mut routes_checked = 0_u64;
     for layer in 0..source.config().num_hidden_layers {
         let actual_router = output.layer_router_logits[layer].to_vec3::<f32>()?;
@@ -136,12 +137,19 @@ pub async fn validate_public_checkpoint(
             .iter()
             .zip(&oracle.output.layer_routes[layer])
         {
-            for (actual, expected) in actual_row.iter().zip(expected_row) {
+            for (actual, expected_at_rank) in actual_row.iter().zip(expected_row) {
                 routes_checked = routes_checked.saturating_add(1);
-                if actual.expert != expected.expert {
+                if actual.expert != expected_at_rank.expert {
+                    route_order_mismatches = route_order_mismatches.saturating_add(1);
+                }
+                if let Some(expected) = expected_row
+                    .iter()
+                    .find(|expected| expected.expert == actual.expert)
+                {
+                    route_weights.observe(actual.weight, expected.weight)?;
+                } else {
                     route_expert_mismatches = route_expert_mismatches.saturating_add(1);
                 }
-                route_weights.observe(actual.weight, expected.weight)?;
             }
         }
     }
@@ -176,6 +184,7 @@ pub async fn validate_public_checkpoint(
         router_logits,
         route_weights,
         route_expert_mismatches,
+        route_order_mismatches,
         argmax_token_mismatches,
         status: if failed {
             Qwen36MoeValidationStatus::Failed

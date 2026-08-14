@@ -86,7 +86,10 @@ pub struct Qwen36MoeValidationReport {
     pub logits: Qwen36MoeNumericComparison,
     pub router_logits: Qwen36MoeNumericComparison,
     pub route_weights: Qwen36MoeNumericComparison,
+    /// Selected experts absent from the oracle top-k set.
     pub route_expert_mismatches: u64,
+    /// Rank changes within an otherwise unordered top-k expert set.
+    pub route_order_mismatches: u64,
     pub argmax_token_mismatches: u64,
     pub status: Qwen36MoeValidationStatus,
 }
