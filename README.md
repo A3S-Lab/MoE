@@ -123,7 +123,7 @@ streaming loader currently requires a CPU Power runtime. It does not advertise
 vision, video, or MTP inference, and it does not claim that a present GPU is
 used. The HTTP transport, OpenAI response framing, authentication, rate limiting,
 metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
-resident in the current CPU path. The complete pinned 13.8 GB public
+resident in the current CPU path. The complete pinned 13.8 GB OLMoE public
 checkpoint has passed Transformers-to-Rust numerical validation, bounded
 conversion, Power-streamed generation, resident token-parity comparison, and
 real HTTP completion/SSE smoke tests. The published OLMoE checkpoint is a base
