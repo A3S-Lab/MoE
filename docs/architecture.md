@@ -10,7 +10,9 @@ movement—without coupling generic Power runtime code to one model family.
 OLMoE established the first model contract. Qwen3-MoE is the second admitted
 architecture and changes head geometry, routing normalization, expert source
 layout, and the dense/sparse layer schedule without modifying Power's
-residency core.
+residency core. Qwen3.6-35B-A3B adds a third text architecture boundary: it
+alternates Gated DeltaNet and full-attention token mixers, routes every layer
+through 256 experts, and combines the routed result with a shared expert.
 
 ## Ownership
 
@@ -41,12 +43,27 @@ Pack, validation, benchmark, and server entrypoints select that profile after
 bounded architecture detection. Library callers keep full control of supplied
 limits; model loading never silently widens them.
 
+Qwen3.6 has its own bounded profile rather than inheriting the Qwen3-MoE
+numbers. It admits at most 80 GiB across 16,384 model files, 48 GiB of request
+state, and 640M elements in one tensor. Those limits cover the exact
+71,903,776,776-byte, 26-shard source checkpoint, the worst supported
+one-expert-per-file packed layout, four maximum-context mixed KV/recurrent
+states, and the public fused expert arrays. The text-only pack authenticates
+the outer checkpoint, including vision and MTP source tensors, but does not
+copy or advertise either unsupported namespace.
+
 The entrypoints likewise select an architecture-owned residency default.
 Qwen3-MoE permits at most 128 weights and 4 GiB in one exact current-layer
 staging batch, enough for a full 128-expert union in lossless F32 form. This is
 separate from its four-worker, 512 MiB concurrent-read window and from the
 operator-selected host/device cache sizes. Power's generic residency defaults
 remain unchanged, and explicitly supplied library policies are not widened.
+
+The Qwen3.6 residency profile raises the per-layer union to 256 records and
+4 GiB. A complete layer of 256 F32 experts occupies 3 GiB before record
+headers, while concurrent storage reads remain constrained by the separate
+512 MiB in-flight window. As with the earlier families, only Power owns
+retained expert bytes.
 
 ## Numerical Invariants
 
@@ -62,6 +79,13 @@ OLMoE inference follows the reference order:
 
 The Power batch union is solely an I/O schedule. It cannot alter steps 2–7.
 Duplicate, out-of-range, empty, or non-finite routes fail closed.
+
+Qwen3.6 retains the same exact-routing contract but normalizes the selected
+Top-8 weights after selection. Each layer adds the routed reduction and a
+separately gated shared SiLU expert to the residual stream. Its token-mixer
+cache is heterogeneous: three layers keep convolution and F32 recurrent state,
+then one layer keeps K/V state. Every forward step clones that mixed cache and
+publishes it only after all dense and routed work succeeds.
 
 ## Weight Representations
 
@@ -93,6 +117,12 @@ integrity-verified tensor-subrange API to read one expert slice at a time. The
 same bounded range API streams dense tensors larger than the conversion budget
 into valid one-tensor SafeTensor files. The declared buffer limit therefore
 applies without relying on a complete source tensor being smaller than it.
+
+Qwen3.6's official text namespace uses fused 3-D expert arrays in every layer.
+It reuses the same subrange converter and atomic record format. The checkpoint
+index may also contain vision and MTP tensors; source verification binds them,
+whereas the text pack contains exactly the 693 language-model tensors required
+for generation and declares only the `text-generation` capability.
 
 Only `WeightHierarchy` owns expert-cache resident bytes. The packed loaders
 compute the exact F32 materialized size of the validated dense inventory and
@@ -280,6 +310,30 @@ fine-tune. It does not present the base model as instruction-tuned.
   gate has zero mismatches across 768 routes, two simultaneous HTTP requests
   complete through the shared service, and the raw bounded-cache performance
   report is checked under `evidence/`.
+
+### M8: Qwen3.6 Text Architecture
+
+- Implemented contract: strict outer `qwen3_5_moe` and inner
+  `qwen3_5_moe_text` configuration validation, an exact pinned 26-shard public
+  inventory, explicit text/vision/MTP namespace accounting, and a text-only
+  capability boundary.
+- Implemented equations: offset RMSNorm, the official three-to-one Gated
+  DeltaNet/full-attention schedule, depthwise convolution, F32 recurrent
+  state, per-head Q/K normalization, partial RoPE, attention output gates,
+  normalized Top-8 routing over 256 experts, and the gated shared expert.
+- Implemented residency: the common bounded fused-expert converter produces
+  atomic records; resident and Power-streamed CPU paths share transactional
+  mixed cache state, exact routes, greedy generation, ragged route-unioned
+  batches, and the common continuous scheduler.
+- Implemented service and evidence tooling: architecture auto-detection,
+  completion/chat/SSE backends, versioned benchmark reports, and an independent
+  pinned Transformers F32-operation oracle that captures all vocabulary logits
+  and every layer's normalized routes.
+- Public acceptance remains evidence-driven: the exact source checkpoint must
+  pass full-file hashing, conversion, oracle parity, simultaneous real HTTP
+  requests, and cold/warm measurement on the target host before throughput is
+  reported. The current implementation is CPU-only and makes no CUDA-use
+  claim for a present NVIDIA device.
 
 ## Acceptance Gates
 

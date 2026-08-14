@@ -70,8 +70,26 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
   > qwen3-moe-performance.json
 ```
 
+Qwen3.6 uses the same measurement boundary and independent-oracle parity gate:
+
+```shell
+cargo run --release --features benchmark --bin a3s-moe-bench -- \
+  /models/Qwen3.6-35B-A3B-a3s \
+  --prompt "Bitcoin is" \
+  --max-tokens 8 \
+  --warm-samples 3 \
+  --host-cache-mib 4096 \
+  --checkpoint-label qwen3.6-35b-a3b-bf16 \
+  > qwen3.6-35b-a3b-performance.json
+```
+
+The current Qwen3.6 loader intentionally accepts only `--device cpu`. A CUDA
+device present in the host is not part of this result until a separate
+accelerator implementation passes the same oracle and evidence gates.
+
 Artifacts use `a3s.moe.olmoe-performance.v1` or
-`a3s.moe.qwen3-moe-performance.v1` and include:
+`a3s.moe.qwen3-moe-performance.v1`; Qwen3.6 reports use
+`a3s.moe.qwen3.6-moe-performance.v1`. All include:
 
 - the exact a3s-moe Git revision (with an explicit `-dirty` suffix when code
   inputs differ from `HEAD`) and pinned Power revision;

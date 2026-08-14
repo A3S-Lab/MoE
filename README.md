@@ -7,17 +7,19 @@ composition. This crate owns architecture-specific tensor names, layouts,
 routing equations, kernels, KV-cache semantics, tokenization, and generation.
 
 The supported architectures are
-[OLMoE-1B-7B](https://huggingface.co/allenai/OLMoE-1B-7B-0924) and
-[Qwen3-30B-A3B-Base](https://huggingface.co/Qwen/Qwen3-30B-A3B-Base).
-OLMoE has 64 experts per layer with 8 selected per token, 7B total parameters,
-and approximately 1B active parameters. Qwen3-MoE supplies a second
-architecture boundary without changing Power's model-neutral residency core.
+[OLMoE-1B-7B](https://huggingface.co/allenai/OLMoE-1B-7B-0924),
+[Qwen3-30B-A3B-Base](https://huggingface.co/Qwen/Qwen3-30B-A3B-Base), and the
+text-generation path of
+[Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B). OLMoE has 64
+experts per layer with 8 selected per token, 7B total parameters, and
+approximately 1B active parameters. Qwen3-MoE and Qwen3.6 exercise independent
+model boundaries without changing Power's model-neutral residency core.
 
 ## Current Status
 
 The M0 numerical contract, resident M1 CPU engine, bounded M2 expert streaming,
 M3 continuous batching path, M4 service path, M6 encrypted-weight foundation,
-and M7 Qwen3-MoE inference/service path are implemented and tested:
+M7 Qwen3-MoE path, and M8 Qwen3.6 text path are implemented and tested:
 
 - Hugging Face compatible OLMoE configuration parsing and strict geometry
   validation.
@@ -99,8 +101,27 @@ and M7 Qwen3-MoE inference/service path are implemented and tested:
   architecture-aware Rust validator and performance-evidence harness. The
   checked public 30B-A3B reports cover numerical parity, two concurrent HTTP
   requests, bounded CPU inference, and raw performance telemetry.
+- A pinned Qwen3.6-35B-A3B contract for the exact 26-shard BF16 checkpoint,
+  including its outer multimodal index, 693 text tensors, tokenizer, revision,
+  byte lengths, and file SHA-256 values. Vision and MTP namespaces are
+  authenticated source inputs but are deliberately excluded from the packed
+  checkpoint's `text-generation` capability.
+- Exact Qwen3.6 text equations: three Gated DeltaNet layers followed by one
+  full-attention layer per four-layer group, offset RMSNorm, per-head Q/K
+  normalization, partial RoPE, attention output gates, transactional mixed
+  recurrent/convolution/KV caches, and greedy incremental generation.
+- All 40 Qwen3.6 layers route normalized Top-8 selections across 256 experts
+  and combine them with the gated shared expert. Fused expert arrays are
+  converted through the common bounded subrange packer and served by the sole
+  Power weight hierarchy.
+- Qwen3.6 ragged route-unioned batching, typed backend composition, automatic
+  `qwen3_5_moe` detection, concurrent OpenAI completion, SSE, benchmark
+  evidence, and a provenance-bound public F32-operation validator.
 
-The HTTP transport, OpenAI response framing, authentication, rate limiting,
+The Qwen3.6 implementation currently exposes text generation only and its
+streaming loader currently requires a CPU Power runtime. It does not advertise
+vision, video, or MTP inference, and it does not claim that a present GPU is
+used. The HTTP transport, OpenAI response framing, authentication, rate limiting,
 metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
 resident in the current CPU path. The complete pinned 13.8 GB public
 checkpoint has passed Transformers-to-Rust numerical validation, bounded
@@ -114,7 +135,7 @@ fine-tune. Checked raw evidence lives under [`evidence/`](evidence/).
 
 ```text
 a3s-moe (model owner)
-  config / tensor names / OLMoE + Qwen3-MoE math / tokenizer / generation
+  config / tensor names / OLMoE + Qwen3-MoE + Qwen3.6 math / tokenizer / generation
                          |
                          | exact routes + atomic weight requests
                          v
@@ -139,6 +160,8 @@ python tools/test_generate_public_oracle.py
 python tools/test_generate_qwen3_moe_oracle.py
 python tools/test_generate_qwen3_moe_full_oracle.py
 python tools/test_generate_qwen3_moe_public_oracle.py
+python tools/test_qwen3_5_moe_public_contract.py
+python tools/test_generate_qwen3_5_moe_public_oracle.py
 ```
 
 Verify the pinned public checkpoint's 3,219 tensor headers without downloading
@@ -191,6 +214,26 @@ expert implementations, and the input token IDs. The Rust validator
 re-hashes those files and the packed source binding before comparing every
 captured logit, router logit, route weight, selected expert, and token argmax.
 
+Generate and validate the Qwen3.6 text oracle from the exact revision pinned in
+`tools/qwen3_5_moe_public_contract.py`:
+
+```shell
+PYTHONPATH=/src/transformers/src python \
+  tools/generate_qwen3_5_moe_public_oracle.py \
+  /models/Qwen3.6-35B-A3B qwen3.6-35b-a3b-oracle.json
+cargo run --release --features validation --bin a3s-moe-validate -- \
+  /models/Qwen3.6-35B-A3B qwen3.6-35b-a3b-oracle.json \
+  --packed-checkpoint /models/Qwen3.6-35B-A3B-a3s \
+  --host-cache-mib 4096 > qwen3.6-35b-a3b-validation.json
+```
+
+The oracle loads only the official `model.language_model` namespace into the
+pinned Transformers `Qwen3_5MoeForCausalLM`, refuses incomplete key mapping,
+disables optional kernels, promotes embedding, linear, and depthwise-convolution
+operations to F32, and captures logits plus normalized Top-8 routes from every
+layer. The Rust validator re-hashes all source files, including the ignored
+vision and MTP shards, before checking the text-only packed binding.
+
 Convert a downloaded Hugging Face checkpoint without buffering a complete
 layer or model:
 
@@ -203,9 +246,10 @@ cargo run --release --bin a3s-moe-pack -- \
 The destination is created only after conversion and digest validation
 complete. The command refuses to overwrite an existing destination and emits a
 JSON conversion report containing the observed peak buffered bytes. It reads
-`model_type` from the validated source configuration and accepts both `olmoe`
-and `qwen3_moe`. Each family supplies explicit Power resource limits: Qwen3-MoE
-permits at most 64 GiB of source or packed weights and 8,192 SafeTensor files,
+`model_type` from the validated source configuration and accepts `olmoe`,
+`qwen3_moe`, and `qwen3_5_moe`. Each family supplies explicit Power resource
+limits: Qwen3-MoE permits at most 64 GiB of source or packed weights and 8,192
+SafeTensor files,
 which covers the pinned 61 GB checkpoint and the worst supported
 one-expert-per-file packing without weakening Power's global defaults. Its
 512M per-tensor bound covers both the 311,164,928-element embedding/head and a
@@ -222,6 +266,17 @@ example:
 ```shell
 cargo run --release --bin a3s-moe-pack -- \
   /models/Qwen3-30B-A3B-Base /models/Qwen3-30B-A3B-Base-a3s \
+  --experts-per-file 8 --max-buffer-mib 512
+```
+
+The Qwen3.6 text conversion uses the same command. Its family profile admits
+the pinned 71.9 GB source, all 10,240 possible one-expert packed files, four
+maximum-context mixed caches, and a complete 256-expert F32 layer union under
+explicit 80 GiB, 16,384-file, 48 GiB state, and 4 GiB staging bounds:
+
+```shell
+cargo run --release --bin a3s-moe-pack -- \
+  /models/Qwen3.6-35B-A3B /models/Qwen3.6-35B-A3B-a3s \
   --experts-per-file 8 --max-buffer-mib 512
 ```
 
@@ -250,8 +305,8 @@ cargo run --release --features server --bin a3s-moe-server -- \
   --max-concurrent-requests 4
 ```
 
-The server detects `olmoe` or `qwen3_moe` from the checkpoint's bounded
-`config.json`, injects the corresponding typed backend, and registers a
+The server detects `olmoe`, `qwen3_moe`, or `qwen3_5_moe` from the
+checkpoint's bounded `config.json`, injects the corresponding typed backend, and registers a
 process-local manifest. Supported sampling controls are
 `temperature`, `top_p`, `top_k`, `min_p`, `seed`, `repeat_penalty`,
 `repeat_last_n`, `frequency_penalty`, and `presence_penalty`. Unsupported
@@ -267,8 +322,16 @@ cargo run --release --features server --bin a3s-moe-server -- \
   --host-cache-mib 512 --max-concurrent-requests 4
 ```
 
+For Qwen3.6, omitting `--model` selects `qwen3.6-35b-a3b`:
+
+```shell
+cargo run --release --features server --bin a3s-moe-server -- \
+  /models/Qwen3.6-35B-A3B-a3s --device cpu \
+  --host-cache-mib 4096 --max-concurrent-requests 4
+```
+
 Encrypted service loading currently applies only to the OLMoE confidential
-checkpoint envelope and fails closed for Qwen3-MoE.
+checkpoint envelope and fails closed for Qwen3-MoE and Qwen3.6.
 
 Serve the encrypted form by supplying both its pinned trust anchor and the
 environment variable that owns the key:
@@ -322,6 +385,16 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
   --prompt "Bitcoin is" --max-tokens 8 --warm-samples 3 \
   --host-cache-mib 4096 --checkpoint-label qwen3-30b-a3b-bf16 \
   > qwen3-moe-performance.json
+```
+
+Qwen3.6 uses the same evidence boundary and its own versioned schema:
+
+```shell
+cargo run --release --features benchmark --bin a3s-moe-bench -- \
+  /models/Qwen3.6-35B-A3B-a3s \
+  --prompt "Bitcoin is" --max-tokens 8 --warm-samples 3 \
+  --host-cache-mib 4096 --checkpoint-label qwen3.6-35b-a3b-bf16 \
+  > qwen3.6-35b-a3b-performance.json
 ```
 
 The first sample starts with an empty Power expert cache. Warm samples retain

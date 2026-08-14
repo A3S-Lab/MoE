@@ -14,8 +14,14 @@
   `56d820671d810b68f31056605cec0c674994c8f962370194225911ac6a71a365`)
 - Qwen3-30B-A3B-Base checkpoint:
   `1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9`
+- Transformers Qwen3.6-MoE equations:
+  `918dbf131d0df5b46e3f6e1d96174d62aa4d16d6`
+  (`modeling_qwen3_5_moe.py` SHA-256
+  `16ef7b0dc6e26eae26a6ffd0ad11d93f85424f90ffb85fbcc9eecc0759cc930d`)
+- Qwen3.6-35B-A3B checkpoint:
+  `995ad96eacd98c81ed38be0c5b274b04031597b0`
 - A3S Power composition, process-local manifest, and packed-record contract:
-  `be82555`
+  `42c66460533112cc5cb82931a6beda09fc2361ed`
 
 ## Numerical Gates
 
@@ -95,6 +101,8 @@ from evidence rather than guessed.
 - Exact token-ID prompt digests are exposed for rendered chat prompts.
 - A real `a3s-moe-server` subprocess passes model listing, non-streaming OpenAI
   completion, and SSE completion tests through Power's HTTP router.
+- The same real-server fixture auto-detects a Qwen3.6 text pack and verifies two
+  simultaneous completion requests plus incremental SSE framing.
 - The benchmark regressions validate each architecture's versioned JSON schema,
   TTFT, generated-token count, expert bytes read, cache-state labels, and
   process peak RSS. OLMoE additionally validates token parity with an isolated
@@ -209,6 +217,49 @@ argmax mismatches; the maximum absolute differences are `4.9591064e-5` for
 logits, `3.6239624e-5` for router logits, and `1.1920929e-6` for normalized
 route weights. A separate checked HTTP report records two simultaneous
 requests completing with identical one-token output.
+
+## Qwen3.6-35B-A3B Text Gates
+
+- Configuration validation requires the exact outer `qwen3_5_moe` and inner
+  `qwen3_5_moe_text` families, 40 declared layer types, a three-linear/one-full
+  schedule, explicit 256-wide attention heads, partial RoPE, F32 recurrent
+  state, 256 experts, normalized Top-8 routing, and the supported token IDs.
+- The source checkpoint contract pins 34 files. Its 26 BF16 shards total
+  71,903,776,776 bytes and index exactly 1,045 tensors: 693 text tensors, 333
+  authenticated-but-unsupported vision tensors, and 19 authenticated MTP
+  tensors. Missing, added, remapped, resized, or rehashed files fail closed.
+- Dependency-free tiny fixtures cover offset RMSNorm, depthwise causal
+  convolution, Gated DeltaNet recurrence, full attention with per-head Q/K
+  normalization and output gates, mixed-cache prefill/decode parity, shared
+  expert gating, normalized routes, resident-versus-streamed logits, BF16
+  packing, cache bounds, cancellation, and greedy generation.
+- Every one of the 40 layers has exactly 256 atomic expert records after
+  conversion. The converter reads official fused arrays through Power's
+  verified subrange API, never buffers more than its declared budget, and
+  rejects any dense, expert, manifest, or source-binding discrepancy.
+- The Qwen3.6 family profile covers the exact checkpoint under 80 GiB and
+  16,384-file bounds, four maximum-context mixed states under 48 GiB, a 640M
+  element per-tensor limit that covers the 536,870,912-element fused gate/up
+  array, and one complete 256-expert F32 union under the 4 GiB residency
+  staging limit.
+- Ragged batches retain independent mixed cache positions while unioning exact
+  routes per layer. Continuous generation uses Power admission, fairness,
+  cancellation, aggregate-state checks, and one immutable roster per step.
+- The public oracle imports the pinned Transformers checkout, maps only the
+  complete official `model.language_model` namespace into
+  `Qwen3_5MoeForCausalLM`, rejects missing or mismatched text keys, retains
+  BF16 storage, and promotes embedding, linear, and depthwise-convolution
+  operations to CPU F32. It captures every vocabulary logit and normalized
+  Top-8 route from all layers.
+- The Rust validator re-hashes all 34 source files, including the vision and
+  MTP shards excluded from the text pack, verifies the packed source/config/
+  tokenizer binding, and compares logits, router logits, route weights, expert
+  IDs, and argmax tokens. Provenance rejection and numerical-failure reports
+  are deterministic regression tests.
+- Full public parity and target-host performance are acceptance outputs, not
+  inferred claims. Their checked artifacts are added only after exact weight
+  download, conversion, oracle execution, real concurrent HTTP execution, and
+  release benchmarking complete.
 
 The benchmark's first generation is application-cold with respect to Power's
 expert cache. Integrity verification may already populate the operating-system
