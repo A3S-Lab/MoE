@@ -18,6 +18,13 @@ const QWEN3_MOE_MAX_TENSOR_ELEMENTS: usize = 512 * 1024 * 1024;
 const QWEN3_MOE_MAX_STAGED_WEIGHTS: usize = 128;
 const QWEN3_MOE_MAX_STAGED_BYTES: u64 = 4 * GIB;
 const QWEN3_MOE_MAX_INFLIGHT_BYTES: u64 = 512 * 1024 * 1024;
+#[cfg(test)]
+const QWEN36_MOE_PUBLIC_WEIGHT_FILE_BYTES: u64 = 71_903_776_776;
+const QWEN36_MOE_MAX_MODEL_FILES: usize = 16_384;
+const QWEN36_MOE_MAX_MODEL_BYTES: u64 = 80 * GIB;
+const QWEN36_MOE_MAX_STATE_BYTES: u64 = 48 * GIB;
+const QWEN36_MOE_MAX_TENSOR_ELEMENTS: usize = 640 * 1024 * 1024;
+const QWEN36_MOE_MAX_STAGED_WEIGHTS: usize = 256;
 
 /// Model architecture implemented by this crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,6 +32,7 @@ const QWEN3_MOE_MAX_INFLIGHT_BYTES: u64 = 512 * 1024 * 1024;
 pub enum MoeArchitecture {
     Olmoe,
     Qwen3Moe,
+    Qwen35Moe,
 }
 
 impl MoeArchitecture {
@@ -65,6 +73,7 @@ impl MoeArchitecture {
         match probe.model_type.as_str() {
             "olmoe" => Ok(Self::Olmoe),
             "qwen3_moe" => Ok(Self::Qwen3Moe),
+            "qwen3_5_moe" => Ok(Self::Qwen35Moe),
             model_type => Err(MoeError::InvalidConfig(format!(
                 "unsupported checkpoint model_type '{model_type}'"
             ))),
@@ -75,6 +84,7 @@ impl MoeArchitecture {
         match self {
             Self::Olmoe => "olmoe",
             Self::Qwen3Moe => "qwen3_moe",
+            Self::Qwen35Moe => "qwen3_5_moe",
         }
     }
 
@@ -82,6 +92,7 @@ impl MoeArchitecture {
         match self {
             Self::Olmoe => "olmoe",
             Self::Qwen3Moe => "qwen3-moe",
+            Self::Qwen35Moe => "qwen3.6-35b-a3b",
         }
     }
 
@@ -103,6 +114,16 @@ impl MoeArchitecture {
                 limits.max_state_bytes = QWEN3_MOE_MAX_STATE_BYTES;
                 limits.max_tensor_elements = QWEN3_MOE_MAX_TENSOR_ELEMENTS;
             }
+            Self::Qwen35Moe => {
+                // The pinned 35B-A3B checkpoint contains 71.9 GB of tensor
+                // bytes. A one-expert-per-file packed layout has 10,240
+                // expert files, and four maximum-context F32 attention
+                // sessions require just over 40 GiB of bounded state.
+                limits.max_model_files = QWEN36_MOE_MAX_MODEL_FILES;
+                limits.max_model_bytes = QWEN36_MOE_MAX_MODEL_BYTES;
+                limits.max_state_bytes = QWEN36_MOE_MAX_STATE_BYTES;
+                limits.max_tensor_elements = QWEN36_MOE_MAX_TENSOR_ELEMENTS;
+            }
         }
         limits
     }
@@ -122,6 +143,14 @@ impl MoeArchitecture {
                 // cover their lossless F32 form, while the independent
                 // in-flight window keeps concurrent reads bounded.
                 policy.max_prefetch_items = QWEN3_MOE_MAX_STAGED_WEIGHTS;
+                policy.max_prefetch_bytes = QWEN3_MOE_MAX_STAGED_BYTES;
+                policy.max_background_inflight_bytes = QWEN3_MOE_MAX_INFLIGHT_BYTES;
+            }
+            Self::Qwen35Moe => {
+                // Every layer has 256 routed experts. A lossless union of all
+                // public experts occupies about 3 GiB when materialized as
+                // F32, within the same bounded 4 GiB byte window.
+                policy.max_prefetch_items = QWEN36_MOE_MAX_STAGED_WEIGHTS;
                 policy.max_prefetch_bytes = QWEN3_MOE_MAX_STAGED_BYTES;
                 policy.max_background_inflight_bytes = QWEN3_MOE_MAX_INFLIGHT_BYTES;
             }
@@ -151,6 +180,7 @@ mod tests {
         for (model_type, expected) in [
             ("olmoe", Some(MoeArchitecture::Olmoe)),
             ("qwen3_moe", Some(MoeArchitecture::Qwen3Moe)),
+            ("qwen3_5_moe", Some(MoeArchitecture::Qwen35Moe)),
             ("dense", None),
         ] {
             std::fs::write(
@@ -224,5 +254,39 @@ mod tests {
         assert!(qwen.max_background_inflight_bytes < qwen.max_prefetch_bytes);
         assert_eq!(MoeArchitecture::Olmoe.residency_policy(), power_default);
         qwen.validate().unwrap();
+    }
+
+    #[test]
+    fn public_qwen36_profile_covers_checkpoint_state_and_expert_geometry() {
+        const FULL_ATTENTION_LAYERS: u64 = 10;
+        const KV_HEADS: u64 = 2;
+        const HEAD_DIM: u64 = 256;
+        const MAX_CONTEXT_TOKENS: u64 = 262_144;
+        const SERVICE_CONCURRENCY: u64 = 4;
+        const F32_BYTES: u64 = 4;
+        const KEY_AND_VALUE: u64 = 2;
+        const HIDDEN_SIZE: u64 = 2_048;
+        const INTERMEDIATE_SIZE: u64 = 512;
+        const EXPERTS: u64 = 256;
+        const FULL_SERVICE_KV_BYTES: u64 = KEY_AND_VALUE
+            * FULL_ATTENTION_LAYERS
+            * KV_HEADS
+            * HEAD_DIM
+            * MAX_CONTEXT_TOKENS
+            * F32_BYTES
+            * SERVICE_CONCURRENCY;
+        const FULL_F32_EXPERT_UNION: u64 =
+            3 * HIDDEN_SIZE * INTERMEDIATE_SIZE * EXPERTS * F32_BYTES;
+
+        let limits = MoeArchitecture::Qwen35Moe.inference_limits();
+        let residency = MoeArchitecture::Qwen35Moe.residency_policy();
+        assert!(limits.max_model_bytes >= QWEN36_MOE_PUBLIC_WEIGHT_FILE_BYTES);
+        assert!(limits.max_model_files >= 40 * 256);
+        assert!(limits.max_state_bytes >= FULL_SERVICE_KV_BYTES);
+        assert!(limits.max_tensor_elements >= 256 * 2 * 512 * 2_048);
+        assert!(residency.max_prefetch_items >= 256);
+        assert!(residency.max_prefetch_bytes >= FULL_F32_EXPERT_UNION);
+        limits.validate().unwrap();
+        residency.validate().unwrap();
     }
 }

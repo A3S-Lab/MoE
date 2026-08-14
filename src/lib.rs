@@ -13,6 +13,7 @@ mod family;
 mod matrix;
 pub mod olmoe;
 mod packing;
+pub mod qwen3_5_moe;
 pub mod qwen3_moe;
 #[cfg(feature = "server")]
 pub mod service;

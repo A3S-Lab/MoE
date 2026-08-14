@@ -62,6 +62,59 @@ impl ShardedSafeTensors {
             .position(|candidate| candidate == &actual)
             .ok_or_else(|| inventory_error(&actual, &required))?;
 
+        Self::from_index(root, index).map(|weights| (weights, inventory))
+    }
+
+    /// Opens a checkpoint whose required model tensors coexist with explicitly
+    /// ignored tensor families, such as vision and MTP weights in a text-only
+    /// model implementation. Unknown extras still fail closed.
+    pub(crate) fn open_with_ignored_prefixes(
+        root: &Path,
+        required_names: Vec<String>,
+        ignored_prefixes: &[&str],
+    ) -> Result<Self> {
+        if required_names.is_empty()
+            || ignored_prefixes.is_empty()
+            || ignored_prefixes.iter().any(|prefix| prefix.is_empty())
+        {
+            return Err(MoeError::InvalidConfig(
+                "required tensors and ignored prefixes must not be empty".to_string(),
+            ));
+        }
+        let index_path = root.join(INDEX_FILE);
+        enforce_metadata_limit(&index_path, MAX_INDEX_BYTES, "SafeTensor index")?;
+        let index: SafeTensorIndex = serde_json::from_slice(&std::fs::read(&index_path)?)?;
+        if index.weight_map.is_empty() {
+            return Err(MoeError::InvalidConfig(
+                "SafeTensor index weight_map must not be empty".to_string(),
+            ));
+        }
+        let actual = index.weight_map.keys().cloned().collect::<BTreeSet<_>>();
+        let required = required_names.into_iter().collect::<BTreeSet<_>>();
+        let missing = required
+            .difference(&actual)
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>();
+        let unexpected = actual
+            .difference(&required)
+            .filter(|name| {
+                !ignored_prefixes
+                    .iter()
+                    .any(|prefix| name.starts_with(prefix))
+            })
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() || !unexpected.is_empty() {
+            return Err(MoeError::InvalidConfig(format!(
+                "SafeTensor index is incompatible with the text-only inventory; missing examples: {missing:?}; unexpected examples: {unexpected:?}"
+            )));
+        }
+        Self::from_index(root, index)
+    }
+
+    fn from_index(root: &Path, index: SafeTensorIndex) -> Result<Self> {
         let mut shard_names = BTreeSet::new();
         for shard in index.weight_map.values() {
             validate_shard_name(shard)?;
@@ -84,14 +137,11 @@ impl ShardedSafeTensors {
             }
             shards.push(path);
         }
-        Ok((
-            Self {
-                root: root.to_path_buf(),
-                shards,
-                weight_map: index.weight_map,
-            },
-            inventory,
-        ))
+        Ok(Self {
+            root: root.to_path_buf(),
+            shards,
+            weight_map: index.weight_map,
+        })
     }
 
     pub(crate) fn root(&self) -> &Path {
