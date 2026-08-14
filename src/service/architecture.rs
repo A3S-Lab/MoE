@@ -5,6 +5,7 @@ use a3s_power::inference::{EmbeddedRuntime, ResidencyPolicy};
 
 use crate::continuous::ContinuousStreamingModel;
 use crate::olmoe::OlmoeStreamingModel;
+use crate::qwen3_5_moe::{Qwen36MoePackedCheckpoint, Qwen36MoeStreamingModel};
 use crate::qwen3_moe::{Qwen3MoePackedCheckpoint, Qwen3MoeStreamingModel};
 use crate::Result;
 
@@ -98,6 +99,54 @@ impl ServiceArchitecture for Qwen3MoeServiceArchitecture {
         device: OlmoeDeviceSelection,
     ) -> Result<LoadedArtifacts<Self::Model>> {
         let checkpoint = Qwen3MoePackedCheckpoint::open(path, runtime)?;
+        let tokenizer = Arc::new(checkpoint.load_tokenizer()?);
+        let binding = checkpoint.execution_batch_binding()?;
+        let size = directory_size(checkpoint.root())?;
+        let canonical_path = checkpoint.root().to_path_buf();
+        let weights_sha256 = checkpoint.manifest().weights_sha256();
+        let scalar_type = checkpoint.manifest().scalar_type;
+        let context_length = checkpoint.config().max_position_embeddings;
+        let hidden_size = checkpoint.config().hidden_size;
+        let eos_token_ids = checkpoint
+            .config()
+            .eos_token_id
+            .as_ref()
+            .map(|tokens| tokens.values().to_vec())
+            .unwrap_or_default();
+        let model = Arc::new(checkpoint.load_streaming(residency)?);
+        Ok(LoadedArtifacts {
+            canonical_path,
+            tokenizer,
+            model,
+            binding,
+            size,
+            device,
+            weights_sha256,
+            scalar_type,
+            context_length,
+            hidden_size,
+            eos_token_ids,
+        })
+    }
+}
+
+#[doc(hidden)]
+pub struct Qwen36MoeServiceArchitecture;
+
+impl ServiceArchitecture for Qwen36MoeServiceArchitecture {
+    type Model = Qwen36MoeStreamingModel;
+
+    const BACKEND_NAME: &'static str = "a3s-moe-qwen3.6-moe";
+    const FAMILY: &'static str = "qwen3_5_moe";
+    const DISPLAY_NAME: &'static str = "Qwen3.6-35B-A3B";
+
+    fn load_plain(
+        path: PathBuf,
+        runtime: EmbeddedRuntime,
+        residency: ResidencyPolicy,
+        device: OlmoeDeviceSelection,
+    ) -> Result<LoadedArtifacts<Self::Model>> {
+        let checkpoint = Qwen36MoePackedCheckpoint::open(path, runtime)?;
         let tokenizer = Arc::new(checkpoint.load_tokenizer()?);
         let binding = checkpoint.execution_batch_binding()?;
         let size = directory_size(checkpoint.root())?;

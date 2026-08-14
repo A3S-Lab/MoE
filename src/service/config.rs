@@ -82,6 +82,8 @@ pub type MoeBackendConfig = OlmoeBackendConfig;
 
 /// Qwen3-MoE compatibility name for the shared service configuration.
 pub type Qwen3MoeBackendConfig = OlmoeBackendConfig;
+/// Qwen3.6-MoE compatibility name for the shared service configuration.
+pub type Qwen36MoeBackendConfig = OlmoeBackendConfig;
 
 /// Content-free evidence for Power's typed device resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -118,3 +120,5 @@ pub type MoeDeviceSelection = OlmoeDeviceSelection;
 
 /// Qwen3-MoE compatibility name for resolved service device evidence.
 pub type Qwen3MoeDeviceSelection = OlmoeDeviceSelection;
+/// Qwen3.6-MoE compatibility name for resolved service device evidence.
+pub type Qwen36MoeDeviceSelection = OlmoeDeviceSelection;

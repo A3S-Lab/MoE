@@ -100,6 +100,9 @@ async fn run() -> Result<ExitCode> {
                 ExitCode::FAILURE
             })
         }
+        MoeArchitecture::Qwen35Moe => Err(MoeError::InvalidConfig(
+            "Qwen3.6 validation requires the qwen3.6 public-oracle validator".to_string(),
+        )),
     }
 }
 

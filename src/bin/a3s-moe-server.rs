@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use a3s_moe::olmoe::OlmoeEncryptedCheckpointSource;
-use a3s_moe::service::{MoeBackendConfig, MoeDeviceSpec, OlmoeBackend, Qwen3MoeBackend};
+use a3s_moe::service::{
+    MoeBackendConfig, MoeDeviceSpec, OlmoeBackend, Qwen36MoeBackend, Qwen3MoeBackend,
+};
 use a3s_moe::MoeArchitecture;
 use a3s_power::backend::Backend;
 use a3s_power::config::PowerConfig;
@@ -180,6 +182,21 @@ async fn main() -> Result<()> {
                 bail!("encrypted checkpoint loading is currently supported only for OLMoE");
             }
             let backend = Arc::new(Qwen3MoeBackend::new(backend_config)?);
+            let manifest = backend
+                .preload(&model_name, &args.checkpoint, template_override)
+                .await?;
+            let device = backend.device_selection(&manifest.name)?;
+            let backend: Arc<dyn Backend> = backend;
+            (backend, manifest, device)
+        }
+        MoeArchitecture::Qwen35Moe => {
+            if args.encrypted_manifest_sha256.is_some() || args.encrypted_key_env.is_some() {
+                bail!("encrypted checkpoint loading is currently supported only for OLMoE");
+            }
+            if args.device.preference() != a3s_power::inference::DevicePreference::Cpu {
+                bail!("Qwen3.6-35B-A3B currently requires --device cpu");
+            }
+            let backend = Arc::new(Qwen36MoeBackend::new(backend_config)?);
             let manifest = backend
                 .preload(&model_name, &args.checkpoint, template_override)
                 .await?;

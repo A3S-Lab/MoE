@@ -12,6 +12,10 @@ use crate::olmoe::{
     OlmoeKvCache, OlmoeStreamingBatchOutput, OlmoeStreamingBatchRow, OlmoeStreamingBatchRowOutput,
     OlmoeStreamingModel,
 };
+use crate::qwen3_5_moe::{
+    Qwen36MoeCache, Qwen36MoeStreamingBatchOutput, Qwen36MoeStreamingBatchRow,
+    Qwen36MoeStreamingBatchRowOutput, Qwen36MoeStreamingModel,
+};
 use crate::qwen3_moe::{
     Qwen3MoeKvCache, Qwen3MoeStreamingBatchOutput, Qwen3MoeStreamingBatchRow,
     Qwen3MoeStreamingBatchRowOutput, Qwen3MoeStreamingModel,
@@ -172,6 +176,72 @@ impl ContinuousStreamingModel for Qwen3MoeStreamingModel {
                 .map(|(input, cache)| Qwen3MoeStreamingBatchRow::new(input, cache))
                 .collect::<Vec<_>>();
             let Qwen3MoeStreamingBatchOutput {
+                rows,
+                layer_union_routes,
+                layer_staging,
+            } = self.forward_batch(&mut rows, permit, cancellation).await?;
+            Ok(ContinuousModelOutput {
+                rows,
+                layer_union_routes,
+                layer_staging,
+            })
+        })
+    }
+}
+
+impl ContinuousStreamingModel for Qwen36MoeStreamingModel {
+    type Cache = Qwen36MoeCache;
+    type RowOutput = Qwen36MoeStreamingBatchRowOutput;
+    type LayerUnionRoutes = Vec<RoutedExpertBatch>;
+    type LayerStaging = Vec<StagedWeightBatchReport>;
+
+    fn runtime(&self) -> &EmbeddedRuntime {
+        Qwen36MoeStreamingModel::runtime(self)
+    }
+
+    fn telemetry(&self) -> PlacementTelemetry {
+        Qwen36MoeStreamingModel::telemetry(self)
+    }
+
+    fn vocab_size(&self) -> usize {
+        self.config().vocab_size
+    }
+
+    fn validate_generation(&self, prompt: &[u32], max_new_tokens: usize) -> Result<()> {
+        crate::qwen3_5_moe::validate_generation_request(self.config(), prompt, max_new_tokens)
+    }
+
+    fn new_cache(&self) -> Self::Cache {
+        Qwen36MoeStreamingModel::new_cache(self)
+    }
+
+    fn cache_position(cache: &Self::Cache) -> usize {
+        cache.position()
+    }
+
+    fn cache_resident_bytes(cache: &Self::Cache) -> Result<u64> {
+        cache.resident_bytes()
+    }
+
+    fn row_logits(output: &Self::RowOutput) -> &Tensor {
+        &output.logits
+    }
+
+    fn forward_continuous_batch<'a>(
+        &'a self,
+        inputs: &'a [Tensor],
+        caches: Vec<&'a mut Self::Cache>,
+        permit: &'a ExecutionPermit,
+        cancellation: &'a CancellationToken,
+    ) -> ContinuousModelFuture<'a, Self::RowOutput, Self::LayerUnionRoutes, Self::LayerStaging>
+    {
+        Box::pin(async move {
+            let mut rows = inputs
+                .iter()
+                .zip(caches)
+                .map(|(input, cache)| Qwen36MoeStreamingBatchRow::new(input, cache))
+                .collect::<Vec<_>>();
+            let Qwen36MoeStreamingBatchOutput {
                 rows,
                 layer_union_routes,
                 layer_staging,

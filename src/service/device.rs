@@ -71,6 +71,8 @@ pub type MoeDeviceSpec = OlmoeDeviceSpec;
 
 /// Qwen3-MoE compatibility name for the service device argument.
 pub type Qwen3MoeDeviceSpec = OlmoeDeviceSpec;
+/// Qwen3.6-MoE compatibility name for the service device argument.
+pub type Qwen36MoeDeviceSpec = OlmoeDeviceSpec;
 
 #[cfg(test)]
 mod tests {

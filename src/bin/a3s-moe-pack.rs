@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use a3s_moe::olmoe::{OlmoeCheckpoint, OlmoeConversionOptions};
+use a3s_moe::qwen3_5_moe::Qwen36MoeCheckpoint;
 use a3s_moe::qwen3_moe::Qwen3MoeCheckpoint;
 use a3s_moe::{MoeArchitecture, MoeError, Result};
 
@@ -66,6 +67,9 @@ fn run() -> Result<()> {
         MoeArchitecture::Qwen3Moe => {
             Qwen3MoeCheckpoint::open(&source)?.convert_to_packed(&destination, &limits, options)?
         }
+        MoeArchitecture::Qwen35Moe => {
+            Qwen36MoeCheckpoint::open(&source)?.convert_to_packed(&destination, &limits, options)?
+        }
     };
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
@@ -86,6 +90,6 @@ fn parse_positive(value: &str, flag: &str) -> Result<usize> {
 fn print_usage() {
     eprintln!(
         "Usage: a3s-moe-pack <source> <destination> [--experts-per-file N] [--max-buffer-mib N]\n\
-         Source model_type must be olmoe or qwen3_moe."
+         Source model_type must be olmoe, qwen3_moe, or qwen3_5_moe."
     );
 }

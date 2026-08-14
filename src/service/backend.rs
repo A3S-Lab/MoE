@@ -20,7 +20,8 @@ use crate::olmoe::OlmoeEncryptedCheckpointSource;
 use crate::{MoeError, MoeTokenizer, Result};
 
 use super::architecture::{
-    load_olmoe_source, OlmoeServiceArchitecture, Qwen3MoeServiceArchitecture, ServiceArchitecture,
+    load_olmoe_source, OlmoeServiceArchitecture, Qwen36MoeServiceArchitecture,
+    Qwen3MoeServiceArchitecture, ServiceArchitecture,
 };
 use super::config::{OlmoeBackendConfig, OlmoeDeviceSelection};
 use super::load::{
@@ -40,6 +41,7 @@ pub struct MoeBackend<A: ServiceArchitecture> {
 
 pub type OlmoeBackend = MoeBackend<OlmoeServiceArchitecture>;
 pub type Qwen3MoeBackend = MoeBackend<Qwen3MoeServiceArchitecture>;
+pub type Qwen36MoeBackend = MoeBackend<Qwen36MoeServiceArchitecture>;
 
 struct LoadedModel<A: ServiceArchitecture> {
     manifest: ModelManifest,

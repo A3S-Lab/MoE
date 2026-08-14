@@ -3,9 +3,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use a3s_moe::olmoe::{OlmoeCheckpoint, OlmoeConfig, OlmoeCpuModel};
+use a3s_moe::qwen3_5_moe::Qwen36MoeConfig;
 use a3s_moe::qwen3_moe::Qwen3MoeConfig;
 use a3s_moe::service::{
-    MoeBackendConfig, MoeDeviceSelection, MoeDeviceSpec, OlmoeBackend, Qwen3MoeBackend,
+    MoeBackendConfig, MoeDeviceSelection, MoeDeviceSpec, OlmoeBackend, Qwen36MoeBackend,
+    Qwen3MoeBackend,
 };
 use a3s_moe::{MoeArchitecture, MoeTokenizer};
 use a3s_power::backend::types::CompletionRequest;
@@ -68,6 +70,7 @@ struct Args {
 enum BenchmarkBackend {
     Olmoe(Arc<OlmoeBackend>),
     Qwen3Moe(Arc<Qwen3MoeBackend>),
+    Qwen36Moe(Arc<Qwen36MoeBackend>),
 }
 
 impl BenchmarkBackend {
@@ -75,6 +78,7 @@ impl BenchmarkBackend {
         Ok(match architecture {
             MoeArchitecture::Olmoe => Self::Olmoe(Arc::new(OlmoeBackend::new(config)?)),
             MoeArchitecture::Qwen3Moe => Self::Qwen3Moe(Arc::new(Qwen3MoeBackend::new(config)?)),
+            MoeArchitecture::Qwen35Moe => Self::Qwen36Moe(Arc::new(Qwen36MoeBackend::new(config)?)),
         })
     }
 
@@ -82,6 +86,7 @@ impl BenchmarkBackend {
         match self {
             Self::Olmoe(backend) => backend.preload(model, checkpoint, None).await,
             Self::Qwen3Moe(backend) => backend.preload(model, checkpoint, None).await,
+            Self::Qwen36Moe(backend) => backend.preload(model, checkpoint, None).await,
         }
     }
 
@@ -89,6 +94,7 @@ impl BenchmarkBackend {
         match self {
             Self::Olmoe(backend) => backend.telemetry(model),
             Self::Qwen3Moe(backend) => backend.telemetry(model),
+            Self::Qwen36Moe(backend) => backend.telemetry(model),
         }
     }
 
@@ -96,6 +102,7 @@ impl BenchmarkBackend {
         match self {
             Self::Olmoe(backend) => backend.device_selection(model),
             Self::Qwen3Moe(backend) => backend.device_selection(model),
+            Self::Qwen36Moe(backend) => backend.device_selection(model),
         }
     }
 
@@ -105,6 +112,9 @@ impl BenchmarkBackend {
                 run_streaming(backend.as_ref(), model, prompt, max_tokens).await
             }
             Self::Qwen3Moe(backend) => {
+                run_streaming(backend.as_ref(), model, prompt, max_tokens).await
+            }
+            Self::Qwen36Moe(backend) => {
                 run_streaming(backend.as_ref(), model, prompt, max_tokens).await
             }
         }
@@ -126,7 +136,7 @@ async fn main() -> Result<()> {
         )
     })?;
     let architecture = MoeArchitecture::detect(&checkpoint)?;
-    if architecture == MoeArchitecture::Qwen3Moe && args.resident_checkpoint.is_some() {
+    if architecture != MoeArchitecture::Olmoe && args.resident_checkpoint.is_some() {
         anyhow::bail!(
             "the public Qwen3-MoE gate uses the independent oracle for parity; \
              --resident-checkpoint is available only for OLMoE"
@@ -206,6 +216,7 @@ async fn main() -> Result<()> {
         schema: match architecture {
             MoeArchitecture::Olmoe => OLMOE_SCHEMA,
             MoeArchitecture::Qwen3Moe => QWEN3_MOE_SCHEMA,
+            MoeArchitecture::Qwen35Moe => QWEN36_MOE_SCHEMA,
         },
         generated_at: chrono::Utc::now().to_rfc3339(),
         implementation: ImplementationEvidence {
@@ -299,6 +310,10 @@ fn model_geometry(architecture: MoeArchitecture, checkpoint: &Path) -> Result<(u
         }
         MoeArchitecture::Qwen3Moe => {
             let config = Qwen3MoeConfig::from_json_path(checkpoint.join("config.json"))?;
+            (config.vocab_size, config.max_position_embeddings)
+        }
+        MoeArchitecture::Qwen35Moe => {
+            let config = Qwen36MoeConfig::from_json_path(checkpoint.join("config.json"))?;
             (config.vocab_size, config.max_position_embeddings)
         }
     })

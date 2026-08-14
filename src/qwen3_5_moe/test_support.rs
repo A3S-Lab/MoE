@@ -63,6 +63,10 @@ pub(super) fn tiny_config() -> Qwen36MoeConfig {
 }
 
 pub(super) fn tiny_builder(config: &Qwen36MoeConfig) -> VarBuilder<'static> {
+    VarBuilder::from_tensors(tiny_tensors(config), DType::F32, &Device::Cpu)
+}
+
+pub(super) fn tiny_tensors(config: &Qwen36MoeConfig) -> HashMap<String, Tensor> {
     let mut tensors = HashMap::new();
     let mut seed = 1_usize;
     insert(
@@ -257,7 +261,7 @@ pub(super) fn tiny_builder(config: &Qwen36MoeConfig) -> VarBuilder<'static> {
             );
         }
     }
-    VarBuilder::from_tensors(tensors, DType::F32, &Device::Cpu)
+    tensors
 }
 
 fn insert(

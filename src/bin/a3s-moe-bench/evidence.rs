@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 pub(super) const OLMOE_SCHEMA: &str = "a3s.moe.olmoe-performance.v1";
 pub(super) const QWEN3_MOE_SCHEMA: &str = "a3s.moe.qwen3-moe-performance.v1";
+pub(super) const QWEN36_MOE_SCHEMA: &str = "a3s.moe.qwen3.6-moe-performance.v1";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
