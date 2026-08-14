@@ -157,6 +157,10 @@ remains an M6 acceptance item on a confidential-computing host.
   possible one-expert files under explicit 64 GiB / 8,192-file hard limits. A
   geometry-only unit test proves the generic Power defaults are too small and
   the selected profile is sufficient without allocating weights.
+- The family profile's 512M element bound covers both the public-model
+  embedding/head and the largest accepted fused expert export. Power enforces
+  this bound while indexing every ordinary, encrypted, or lossless tensor
+  source before mmap or materialization.
 - The same geometry test proves that one complete public-model F32 KV cache is
   6 GiB and that the 24 GiB family state limit covers four concurrent 32K
   sessions. Power's generic 4 GiB state limit remains unchanged.

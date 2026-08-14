@@ -14,6 +14,7 @@ const QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES: u64 = 61_066_575_648;
 const QWEN3_MOE_MAX_MODEL_FILES: usize = 8_192;
 const QWEN3_MOE_MAX_MODEL_BYTES: u64 = 64 * GIB;
 const QWEN3_MOE_MAX_STATE_BYTES: u64 = 24 * GIB;
+const QWEN3_MOE_MAX_TENSOR_ELEMENTS: usize = 512 * 1024 * 1024;
 const QWEN3_MOE_MAX_STAGED_WEIGHTS: usize = 128;
 const QWEN3_MOE_MAX_STAGED_BYTES: u64 = 4 * GIB;
 const QWEN3_MOE_MAX_INFLIGHT_BYTES: u64 = 512 * 1024 * 1024;
@@ -100,6 +101,7 @@ impl MoeArchitecture {
                 limits.max_model_files = QWEN3_MOE_MAX_MODEL_FILES;
                 limits.max_model_bytes = QWEN3_MOE_MAX_MODEL_BYTES;
                 limits.max_state_bytes = QWEN3_MOE_MAX_STATE_BYTES;
+                limits.max_tensor_elements = QWEN3_MOE_MAX_TENSOR_ELEMENTS;
             }
         }
         limits
@@ -176,16 +178,26 @@ mod tests {
         const FULL_SESSION_KV_BYTES: u64 =
             KEY_AND_VALUE * LAYERS * KV_HEADS * HEAD_DIM * MAX_CONTEXT_TOKENS * F32_BYTES;
         const FULL_SERVICE_KV_BYTES: u64 = FULL_SESSION_KV_BYTES * SERVICE_CONCURRENCY;
+        const VOCABULARY_SIZE: usize = 151_936;
+        const HIDDEN_SIZE: usize = 2_048;
+        const EXPERTS: usize = 128;
+        const EXPERT_INTERMEDIATE_SIZE: usize = 768;
+        const EMBEDDING_ELEMENTS: usize = VOCABULARY_SIZE * HIDDEN_SIZE;
+        const FUSED_GATE_UP_ELEMENTS: usize = EXPERTS * 2 * EXPERT_INTERMEDIATE_SIZE * HIDDEN_SIZE;
 
         let power_default = InferenceLimits::default();
         let qwen = MoeArchitecture::Qwen3Moe.inference_limits();
         assert!(power_default.max_model_bytes < QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES);
         assert!(power_default.max_model_files < 48 * 128);
         assert!(power_default.max_state_bytes < FULL_SESSION_KV_BYTES);
+        assert!(power_default.max_tensor_elements < EMBEDDING_ELEMENTS);
+        assert!(power_default.max_tensor_elements < FUSED_GATE_UP_ELEMENTS);
         assert!(qwen.max_model_bytes >= QWEN3_MOE_PUBLIC_WEIGHT_FILE_BYTES);
         assert!(qwen.max_model_files >= 48 * 128);
         assert_eq!(FULL_SESSION_KV_BYTES, 6 * GIB);
         assert!(qwen.max_state_bytes >= FULL_SERVICE_KV_BYTES);
+        assert!(qwen.max_tensor_elements >= EMBEDDING_ELEMENTS);
+        assert!(qwen.max_tensor_elements >= FUSED_GATE_UP_ELEMENTS);
         assert_eq!(MoeArchitecture::Olmoe.inference_limits(), power_default);
         qwen.validate().unwrap();
     }

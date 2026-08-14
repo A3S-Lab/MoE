@@ -33,8 +33,10 @@ Power's generic default model limits intentionally do not assume a 61 GB
 checkpoint, thousands of physical expert files, or the public model's F32 KV
 geometry. `a3s-moe` therefore owns a bounded family profile: Qwen3-MoE raises
 `max_model_bytes` to 64 GiB, `max_model_files` to 8,192, and
-`max_state_bytes` to 24 GiB. The state limit covers four complete 32K caches;
-each cache is exactly 6 GiB for 48 layers, 4 KV heads, and head dimension 128.
+`max_state_bytes` to 24 GiB. Its 512M per-tensor limit covers the public
+311,164,928-element embedding/head and a 402,653,184-element fused gate/up
+export. The state limit covers four complete 32K caches; each cache is exactly
+6 GiB for 48 layers, 4 KV heads, and head dimension 128.
 Pack, validation, benchmark, and server entrypoints select that profile after
 bounded architecture detection. Library callers keep full control of supplied
 limits; model loading never silently widens them.

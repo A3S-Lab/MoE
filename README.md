@@ -205,9 +205,11 @@ JSON conversion report containing the observed peak buffered bytes. It reads
 and `qwen3_moe`. Each family supplies explicit Power resource limits: Qwen3-MoE
 permits at most 64 GiB of source or packed weights and 8,192 SafeTensor files,
 which covers the pinned 61 GB checkpoint and the worst supported
-one-expert-per-file packing without weakening Power's global defaults. The
-family's 24 GiB state bound covers four complete 32K F32 KV caches (6 GiB
-each). Its entrypoint residency profile also permits one bounded 4 GiB
+one-expert-per-file packing without weakening Power's global defaults. Its
+512M per-tensor bound covers both the 311,164,928-element embedding/head and a
+402,653,184-element fused gate/up export. The family's 24 GiB state bound
+covers four complete 32K F32 KV caches (6 GiB each). Its entrypoint residency
+profile also permits one bounded 4 GiB
 current-layer expert union while keeping concurrent reads within 512 MiB; this
 covers all 128 public-model experts in lossless F32 form. Explicit library
 policies are never widened during loading. Before any dense tensor is
