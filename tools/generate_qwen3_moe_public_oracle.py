@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generate the pinned public Qwen3-MoE BF16 Transformers oracle."""
+"""Generate the pinned public Qwen3-MoE F32 Transformers oracle."""
 
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -77,6 +78,40 @@ def is_sparse_layer(config: Any, layer: int) -> bool:
     )
 
 
+@contextmanager
+def float32_operations(torch: Any):
+    """Promote weight-bearing operations without materializing an F32 model."""
+    functional = torch.nn.functional
+    original_linear = functional.linear
+    original_embedding = functional.embedding
+
+    def linear(input_tensor: Any, weight: Any, bias: Any = None) -> Any:
+        promoted_bias = None if bias is None else bias.float()
+        return original_linear(input_tensor.float(), weight.float(), promoted_bias)
+
+    def embedding(input_tensor: Any, weight: Any, *args: Any, **kwargs: Any) -> Any:
+        return original_embedding(input_tensor, weight.float(), *args, **kwargs)
+
+    functional.linear = linear
+    functional.embedding = embedding
+    try:
+        yield
+    finally:
+        functional.linear = original_linear
+        functional.embedding = original_embedding
+
+
+def transformers_model_options(torch: Any) -> dict[str, Any]:
+    """Pin low-memory loading and implementations covered by F32 promotion."""
+    return {
+        "local_files_only": True,
+        "torch_dtype": torch.bfloat16,
+        "low_cpu_mem_usage": True,
+        "attn_implementation": "eager",
+        "experts_implementation": "eager",
+    }
+
+
 def routes_from_logits(
     torch: Any,
     logits: Any,
@@ -132,13 +167,14 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
     model = AutoModelForCausalLM.from_pretrained(
         checkpoint,
         config=config,
-        local_files_only=True,
-        torch_dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-        attn_implementation="eager",
+        **transformers_model_options(torch),
     )
     model.eval()
-    with torch.inference_mode():
+    # Keep the pinned BF16 parameters resident, but promote only the weight
+    # slices used by each operation. A fully resident F32 copy exceeds the
+    # acceptance host while the Rust correctness path executes these exact
+    # source values in F32.
+    with float32_operations(torch), torch.inference_mode():
         result = model(
             input_ids=encoded.input_ids,
             attention_mask=encoded.attention_mask,

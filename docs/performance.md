@@ -57,7 +57,7 @@ and Power's resolved device. Only `--device auto` can report
 
 The Qwen3-MoE public run uses the same measurement boundary without a resident
 F32 child. Its parity gate is the separately generated, pinned Transformers
-BF16 oracle:
+F32-operation oracle over the BF16 checkpoint values:
 
 ```shell
 cargo run --release --features benchmark --bin a3s-moe-bench -- \

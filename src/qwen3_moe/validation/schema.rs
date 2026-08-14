@@ -13,7 +13,7 @@ pub const QWEN3_MOE_PUBLIC_MODEL_REVISION: &str = "1b75feb79f60b8dc6c5bc769a898c
 pub const QWEN3_MOE_TRANSFORMERS_REVISION: &str = "918dbf131d0df5b46e3f6e1d96174d62aa4d16d6";
 pub const QWEN3_MOE_TRANSFORMERS_SOURCE_SHA256: &str =
     "56d820671d810b68f31056605cec0c674994c8f962370194225911ac6a71a365";
-pub const QWEN3_MOE_TRANSFORMERS_DTYPE: &str = "bfloat16";
+pub const QWEN3_MOE_TRANSFORMERS_DTYPE: &str = "float32";
 
 /// Provenance for the exact public model and independent equations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,7 +46,8 @@ pub struct Qwen3MoePublicOracle {
     pub output: Qwen3MoeOracleOutput,
 }
 
-/// Absolute tolerances for a BF16 Transformers oracle versus F32 execution.
+/// Absolute tolerances for independent Transformers F32 versus Candle F32
+/// execution.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Qwen3MoeValidationTolerances {

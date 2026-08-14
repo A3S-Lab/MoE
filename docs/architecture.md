@@ -222,7 +222,8 @@ milestones reuse the same oracle for batched, streaming, and accelerator paths.
 - Implemented: a JSON evidence harness measures application-cold and warm
   throughput, TTFT, expert storage bytes, cache telemetry, and process peak RSS.
   The optional OLMoE resident CPU baseline runs in a separate child process;
-  Qwen3-MoE uses its independent pinned BF16 oracle as the parity gate.
+  Qwen3-MoE uses its independent pinned F32-operation oracle over the BF16
+  checkpoint values as the parity gate.
 - Accepted on the checked CPU host: complete-checkpoint conversion, Power
   streaming, real HTTP completion/SSE, eight-token resident parity, and raw
   first/warm performance evidence are checked under `evidence/`. The artifact
@@ -272,7 +273,7 @@ fine-tune. It does not present the base model as instruction-tuned.
   SSE tests. The server automatically selects the model family from
   `config.json`.
 - M7 implemented acceptance tooling: an exact public checkpoint inventory,
-  pinned Transformers BF16 oracle generator, architecture-aware numerical
+  pinned Transformers F32-operation oracle over BF16 weights, architecture-aware numerical
   validator, and family-specific performance evidence schema are regression
   tested.
 - M7 pending acceptance: run the pinned public Qwen3-MoE numerical and

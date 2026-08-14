@@ -187,8 +187,10 @@ remains an M6 acceptance item on a confidential-computing host.
   checkpoint and passes Power model listing, non-streaming OpenAI completion,
   and SSE completion tests using the default `qwen3-moe` model identifier.
 - The public oracle generator requires the exact pinned 16-shard checkpoint,
-  Transformers revision and source digest, runs eager CPU BF16 equations, and
-  captures every prompt logit plus each sparse layer's router logits and
+  Transformers revision and source digest, retains BF16 parameter storage while
+  promoting each weight-bearing operation to eager CPU F32 with the attention
+  and expert implementations pinned to eager, and captures every prompt logit
+  plus each sparse layer's router logits and
   normalized top-k routes. The Rust validator re-hashes the source inventory,
   verifies the packed checkpoint's source digest/config/tokenizer binding, and
   compares all values, expert IDs, and token argmaxes. Its report also records

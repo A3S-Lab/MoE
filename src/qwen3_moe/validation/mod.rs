@@ -50,7 +50,8 @@ impl Default for Qwen3MoeValidationOptions {
 }
 
 /// Compare a pinned source checkpoint and its packed Power-streaming form with
-/// an independently generated BF16 Transformers oracle.
+/// an independently generated F32 Transformers oracle over the pinned BF16
+/// weights.
 pub async fn validate_public_checkpoint(
     source_root: impl AsRef<Path>,
     packed_root: impl AsRef<Path>,

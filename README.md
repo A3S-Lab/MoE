@@ -95,7 +95,8 @@ and M7 Qwen3-MoE inference/service path are implemented and tested:
   family detection, concurrent request batching, OpenAI completion/chat
   streaming, and the same fail-closed request policy as OLMoE.
 - A pinned public Qwen3-MoE acceptance contract and independent Transformers
-  BF16 oracle generator, plus an architecture-aware Rust validator and
+  F32-operation oracle over the pinned BF16 weights, plus an
+  architecture-aware Rust validator and
   performance-evidence harness. The public 30B-A3B run remains an explicit
   acceptance gate until its checked reports are committed.
 
@@ -184,8 +185,9 @@ cargo run --release --features validation --bin a3s-moe-validate -- \
 ```
 
 The generator pins the model revision, all 16 shard byte lengths and SHA-256
-digests, the Transformers Git revision, its Qwen3-MoE source digest, CPU BF16
-execution, eager attention, and the input token IDs. The Rust validator
+digests, the Transformers Git revision, its Qwen3-MoE source digest, BF16
+parameter storage with per-operation CPU F32 promotion, eager attention and
+expert implementations, and the input token IDs. The Rust validator
 re-hashes those files and the packed source binding before comparing every
 captured logit, router logit, route weight, selected expert, and token argmax.
 
@@ -310,8 +312,9 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
 ```
 
 Qwen3-MoE uses the same harness and a family-specific evidence schema. Its
-public parity gate is the independent BF16 oracle, so it deliberately omits
-the memory-intensive resident F32 child:
+public parity gate is the independent F32-operation oracle over the pinned
+BF16 weights, so it deliberately omits the memory-intensive resident F32
+child:
 
 ```shell
 cargo run --release --features benchmark --bin a3s-moe-bench -- \
