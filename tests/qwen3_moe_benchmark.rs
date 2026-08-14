@@ -49,7 +49,8 @@ fn benchmark_emits_qwen3_moe_streaming_evidence_without_resident_baseline() {
     );
     let evidence: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(evidence["schema"], "a3s.moe.qwen3-moe-performance.v1");
-    assert_eq!(evidence["implementation"]["powerRevision"], "be82555");
+    assert_eq!(evidence["implementation"]["powerRevision"], "42c6646");
+    assert_revision(&evidence["implementation"]["moeRevision"]);
     assert_eq!(evidence["model"]["family"], "qwen3_moe");
     assert_eq!(
         evidence["model"]["packedCheckpoint"],
@@ -66,4 +67,14 @@ fn benchmark_emits_qwen3_moe_streaming_evidence_without_resident_baseline() {
         .is_some_and(|value| value > 0));
     assert!(evidence["processPeakRssBytes"].as_u64().is_some());
     assert!(evidence["residentBaseline"].is_null());
+}
+
+fn assert_revision(value: &serde_json::Value) {
+    let revision = value.as_str().unwrap();
+    if revision == "unknown" {
+        return;
+    }
+    let revision = revision.strip_suffix("-dirty").unwrap_or(revision);
+    assert_eq!(revision.len(), 40);
+    assert!(revision.bytes().all(|byte| byte.is_ascii_hexdigit()));
 }

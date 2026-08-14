@@ -38,7 +38,8 @@ fn benchmark_emits_self_describing_json_evidence() {
     );
     let evidence: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(evidence["schema"], "a3s.moe.olmoe-performance.v1");
-    assert_eq!(evidence["implementation"]["powerRevision"], "be82555");
+    assert_eq!(evidence["implementation"]["powerRevision"], "42c6646");
+    assert_revision(&evidence["implementation"]["moeRevision"]);
     assert_eq!(evidence["model"]["packedCheckpoint"], "fixture-packed");
     assert_eq!(evidence["configuration"]["promptTokens"], 1);
     assert_eq!(evidence["configuration"]["requestedDevice"]["kind"], "cpu");
@@ -64,4 +65,14 @@ fn benchmark_emits_self_describing_json_evidence() {
     assert!(evidence["residentBaseline"]["processPeakRssBytes"]
         .as_u64()
         .is_some());
+}
+
+fn assert_revision(value: &serde_json::Value) {
+    let revision = value.as_str().unwrap();
+    if revision == "unknown" {
+        return;
+    }
+    let revision = revision.strip_suffix("-dirty").unwrap_or(revision);
+    assert_eq!(revision.len(), 40);
+    assert!(revision.bytes().all(|byte| byte.is_ascii_hexdigit()));
 }

@@ -73,6 +73,8 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
 Artifacts use `a3s.moe.olmoe-performance.v1` or
 `a3s.moe.qwen3-moe-performance.v1` and include:
 
+- the exact a3s-moe Git revision (with an explicit `-dirty` suffix when code
+  inputs differ from `HEAD`) and pinned Power revision;
 - logical weight digest and packed byte count;
 - OS, architecture, logical parallelism, and available processor identity;
 - prompt and generation settings;

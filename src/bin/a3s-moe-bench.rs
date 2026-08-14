@@ -211,6 +211,7 @@ async fn main() -> Result<()> {
         implementation: ImplementationEvidence {
             crate_name: env!("CARGO_PKG_NAME"),
             crate_version: env!("CARGO_PKG_VERSION"),
+            moe_revision: env!("A3S_MOE_REVISION"),
             power_revision: env!("A3S_POWER_REVISION"),
             execution: "f32-dense-power-streamed-experts",
         },

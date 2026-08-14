@@ -30,6 +30,7 @@ pub(super) struct BenchmarkEvidence {
 pub(super) struct ImplementationEvidence {
     pub crate_name: &'static str,
     pub crate_version: &'static str,
+    pub moe_revision: &'static str,
     pub power_revision: &'static str,
     pub execution: &'static str,
 }
