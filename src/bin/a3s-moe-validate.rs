@@ -4,6 +4,10 @@ use std::process::ExitCode;
 use a3s_moe::olmoe::{
     validate_public_checkpoint as validate_olmoe, OlmoeValidationStatus, OlmoeValidationTolerances,
 };
+use a3s_moe::qwen3_5_moe::{
+    validate_public_checkpoint as validate_qwen36_moe, Qwen36MoeValidationOptions,
+    Qwen36MoeValidationStatus,
+};
 use a3s_moe::qwen3_moe::{
     validate_public_checkpoint as validate_qwen3_moe, Qwen3MoeValidationOptions,
     Qwen3MoeValidationStatus,
@@ -100,9 +104,31 @@ async fn run() -> Result<ExitCode> {
                 ExitCode::FAILURE
             })
         }
-        MoeArchitecture::Qwen35Moe => Err(MoeError::InvalidConfig(
-            "Qwen3.6 validation requires the qwen3.6 public-oracle validator".to_string(),
-        )),
+        MoeArchitecture::Qwen35Moe => {
+            let packed = parsed.packed_checkpoint.clone().ok_or_else(|| {
+                MoeError::InvalidConfig(
+                    "Qwen3.6 validation requires --packed-checkpoint".to_string(),
+                )
+            })?;
+            let mut options = Qwen36MoeValidationOptions::default();
+            parsed.apply_tolerances(
+                &mut options.tolerances.logits_abs,
+                &mut options.tolerances.router_logits_abs,
+                &mut options.tolerances.route_weights_abs,
+            );
+            options.residency_policy.host_cache_bytes =
+                parsed.host_cache_mib.checked_mul(MIB).ok_or_else(|| {
+                    MoeError::InvalidConfig("--host-cache-mib byte count overflowed".to_string())
+                })?;
+            let report =
+                validate_qwen36_moe(checkpoint, packed, PathBuf::from(oracle), options).await?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(if report.status == Qwen36MoeValidationStatus::Passed {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
     }
 }
 

@@ -6,6 +6,8 @@ use candle_nn::VarBuilder;
 
 #[allow(dead_code)]
 pub mod qwen;
+#[allow(dead_code)]
+pub mod qwen36;
 
 pub fn tiny_config() -> OlmoeConfig {
     OlmoeConfig {

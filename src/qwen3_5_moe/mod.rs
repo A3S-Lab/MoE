@@ -13,6 +13,8 @@ mod packed_checkpoint;
 mod streaming;
 #[cfg(test)]
 mod test_support;
+#[cfg(feature = "validation")]
+mod validation;
 
 pub use batch::{
     Qwen36MoeStreamingBatchOutput, Qwen36MoeStreamingBatchRow, Qwen36MoeStreamingBatchRowOutput,
@@ -34,3 +36,13 @@ pub use packed_checkpoint::{
     Qwen36MoePackedManifest,
 };
 pub use streaming::{Qwen36MoeStreamingForwardOutput, Qwen36MoeStreamingModel};
+#[cfg(feature = "validation")]
+pub use validation::{
+    validate_public_checkpoint, Qwen36MoeNumericComparison, Qwen36MoeOracleFile,
+    Qwen36MoeOracleInput, Qwen36MoeOracleModel, Qwen36MoeOracleOutput, Qwen36MoeOracleRoute,
+    Qwen36MoePublicOracle, Qwen36MoeValidationOptions, Qwen36MoeValidationReport,
+    Qwen36MoeValidationStatus, Qwen36MoeValidationTolerances, QWEN36_MOE_PUBLIC_MODEL_ID,
+    QWEN36_MOE_PUBLIC_MODEL_REVISION, QWEN36_MOE_PUBLIC_ORACLE_SCHEMA,
+    QWEN36_MOE_TRANSFORMERS_DTYPE, QWEN36_MOE_TRANSFORMERS_REVISION,
+    QWEN36_MOE_TRANSFORMERS_SOURCE_SHA256, QWEN36_MOE_VALIDATION_SCHEMA,
+};
