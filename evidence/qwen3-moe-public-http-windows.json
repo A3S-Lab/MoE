@@ -1,0 +1,159 @@
+{
+  "schema": "a3s.moe.qwen3-moe-http-smoke.v1",
+  "implementation": {
+    "moeRevision": "0146bd6cee4a3557f303ffb3dbfd1d70975b3802",
+    "powerRevision": "42c6646",
+    "serverSha256": "d50cb15f64641a98b7ea3d8a75ef0039eb5e4305315e95a4ff20537aa67ac36a"
+  },
+  "configuration": {
+    "hostCacheMiB": 4096,
+    "maxConcurrentRequests": 2,
+    "batchWindowMs": 100,
+    "concurrentRequests": 2,
+    "maxGeneratedTokens": 1
+  },
+  "startedAt": "2026-08-14T07:58:02.702398+00:00",
+  "elapsedSeconds": 97.36880890000612,
+  "concurrentCompletionSeconds": 11.755495500023244,
+  "models": {
+    "object": "list",
+    "data": [
+      {
+        "id": "qwen3-moe",
+        "object": "model",
+        "created": 1786694367,
+        "owned_by": "local",
+        "context_length": 32768
+      }
+    ]
+  },
+  "completions": [
+    {
+      "id": "cmpl-a8dd6e0f-21e4-4f9c-a20f-2599ddab0772",
+      "object": "text_completion",
+      "created": 1786694380,
+      "model": "qwen3-moe",
+      "choices": [
+        {
+          "index": 0,
+          "text": " a",
+          "finish_reason": "length"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 2,
+        "completion_tokens": 1,
+        "total_tokens": 3
+      },
+      "system_fingerprint": "fp_a3s_power",
+      "attestation_receipt": {
+        "schema": "a3s.power.inference-receipt.v2",
+        "request_type": "text-completion",
+        "model": "qwen3-moe",
+        "input": {
+          "kind": "text.prompt",
+          "sha256": "4bd6d1ae5c092bb043d1c1b162cba506ea5fdfeb3ea8427bccbaa1da5d29c5d6"
+        },
+        "runtime_policy": {
+          "execution": {
+            "gpu_sha256": "21efe1d6725b5eb41e69685f2c23e48511d51418b88b4970aa5675ce4dadae0e"
+          }
+        },
+        "effective_prompt": {
+          "backend": "a3s-moe-qwen3-moe",
+          "kind": "text.prompt",
+          "sha256": "df316807868a2cb5b1a77000dd29cf4f35b80135f07352e183c4028f322104dc"
+        },
+        "decoding": {
+          "parameters": {
+            "best_of": null,
+            "frequency_penalty": null,
+            "max_tokens": 1,
+            "min_p": null,
+            "mirostat": null,
+            "mirostat_eta": null,
+            "mirostat_tau": null,
+            "n": null,
+            "num_ctx": null,
+            "penalize_newline": null,
+            "presence_penalty": null,
+            "repeat_last_n": null,
+            "repeat_penalty": null,
+            "seed": null,
+            "stream": false,
+            "temperature": 0.0,
+            "tfs_z": null,
+            "top_k": null,
+            "top_p": null,
+            "typical_p": null
+          }
+        }
+      },
+      "attestation_receipt_sha256": "e2ac2a926bb4c7a08eac0d33f3c451fe47162858d070d394f2c05ec9fa38ab35"
+    },
+    {
+      "id": "cmpl-2344f861-06b2-42a8-aeb9-953d513b26be",
+      "object": "text_completion",
+      "created": 1786694380,
+      "model": "qwen3-moe",
+      "choices": [
+        {
+          "index": 0,
+          "text": " a",
+          "finish_reason": "length"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 2,
+        "completion_tokens": 1,
+        "total_tokens": 3
+      },
+      "system_fingerprint": "fp_a3s_power",
+      "attestation_receipt": {
+        "schema": "a3s.power.inference-receipt.v2",
+        "request_type": "text-completion",
+        "model": "qwen3-moe",
+        "input": {
+          "kind": "text.prompt",
+          "sha256": "4bd6d1ae5c092bb043d1c1b162cba506ea5fdfeb3ea8427bccbaa1da5d29c5d6"
+        },
+        "runtime_policy": {
+          "execution": {
+            "gpu_sha256": "21efe1d6725b5eb41e69685f2c23e48511d51418b88b4970aa5675ce4dadae0e"
+          }
+        },
+        "effective_prompt": {
+          "backend": "a3s-moe-qwen3-moe",
+          "kind": "text.prompt",
+          "sha256": "df316807868a2cb5b1a77000dd29cf4f35b80135f07352e183c4028f322104dc"
+        },
+        "decoding": {
+          "parameters": {
+            "best_of": null,
+            "frequency_penalty": null,
+            "max_tokens": 1,
+            "min_p": null,
+            "mirostat": null,
+            "mirostat_eta": null,
+            "mirostat_tau": null,
+            "n": null,
+            "num_ctx": null,
+            "penalize_newline": null,
+            "presence_penalty": null,
+            "repeat_last_n": null,
+            "repeat_penalty": null,
+            "seed": null,
+            "stream": false,
+            "temperature": 0.0,
+            "tfs_z": null,
+            "top_k": null,
+            "top_p": null,
+            "typical_p": null
+          }
+        }
+      },
+      "attestation_receipt_sha256": "e2ac2a926bb4c7a08eac0d33f3c451fe47162858d070d394f2c05ec9fa38ab35"
+    }
+  ],
+  "status": "passed"
+}

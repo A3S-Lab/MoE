@@ -1,0 +1,33 @@
+{
+  "schema": "a3s.moe.qwen3-moe-validation.v1",
+  "moeRevision": "0146bd6cee4a3557f303ffb3dbfd1d70975b3802",
+  "powerRevision": "42c6646",
+  "modelId": "Qwen/Qwen3-30B-A3B-Base",
+  "modelRevision": "1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+  "sourceWeightsSha256": "4d3b96006efb5d2ae169b808411ce96f5c6a136047542e81dec252ed8287e665",
+  "packedWeightsSha256": "1a09b3e68691f80dbfdef8a32ec63d1688dfd9668b48c37c284f60c424a918df",
+  "promptTokens": 2,
+  "vocabularySize": 151936,
+  "layers": 48,
+  "sparseLayers": 48,
+  "experts": 128,
+  "routesChecked": 768,
+  "logits": {
+    "tolerance": 0.25,
+    "maxAbsDiff": 0.000049591064,
+    "mismatchCount": 0
+  },
+  "routerLogits": {
+    "tolerance": 0.1,
+    "maxAbsDiff": 0.000036239624,
+    "mismatchCount": 0
+  },
+  "routeWeights": {
+    "tolerance": 0.005,
+    "maxAbsDiff": 0.0000011920929,
+    "mismatchCount": 0
+  },
+  "routeExpertMismatches": 0,
+  "argmaxTokenMismatches": 0,
+  "status": "passed"
+}

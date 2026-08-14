@@ -273,11 +273,13 @@ fine-tune. It does not present the base model as instruction-tuned.
   SSE tests. The server automatically selects the model family from
   `config.json`.
 - M7 implemented acceptance tooling: an exact public checkpoint inventory,
-  pinned Transformers F32-operation oracle over BF16 weights, architecture-aware numerical
-  validator, and family-specific performance evidence schema are regression
-  tested.
-- M7 pending acceptance: run the pinned public Qwen3-MoE numerical and
-  performance gates and commit their raw reports.
+  pinned Transformers F32-operation oracle over BF16 weights,
+  architecture-aware numerical validator, and family-specific performance
+  evidence schema are regression tested.
+- M7 accepted on the checked CPU host: the pinned Qwen3-30B-A3B-Base numerical
+  gate has zero mismatches across 768 routes, two simultaneous HTTP requests
+  complete through the shared service, and the raw bounded-cache performance
+  report is checked under `evidence/`.
 
 ## Acceptance Gates
 

@@ -96,9 +96,9 @@ and M7 Qwen3-MoE inference/service path are implemented and tested:
   streaming, and the same fail-closed request policy as OLMoE.
 - A pinned public Qwen3-MoE acceptance contract and independent Transformers
   F32-operation oracle over the pinned BF16 weights, plus an
-  architecture-aware Rust validator and
-  performance-evidence harness. The public 30B-A3B run remains an explicit
-  acceptance gate until its checked reports are committed.
+  architecture-aware Rust validator and performance-evidence harness. The
+  checked public 30B-A3B reports cover numerical parity, two concurrent HTTP
+  requests, bounded CPU inference, and raw performance telemetry.
 
 The HTTP transport, OpenAI response framing, authentication, rate limiting,
 metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
@@ -359,9 +359,10 @@ fused-exporter checkpoint loading, tokenizer integration, bounded conversion,
 Power-backed expert streaming, route-unioned continuous batching, service
 composition, and pinned public acceptance tooling for the second family. It
 reuses Power's model-neutral `RoutedExpertBatch`, verified tensor-range I/O,
-lifecycle, and sole residency hierarchy. Pinned public-model numerical and
-performance reports remain pending, so the implementation is not yet
-presented as a production-accepted Qwen3-MoE deployment.
+lifecycle, and sole residency hierarchy. The pinned public-model numerical,
+concurrent HTTP, and performance reports are checked under `evidence/`, so the
+CPU Qwen3-MoE deployment path is accepted at revision `0146bd6` with Power
+revision `42c6646`.
 
 ## License
 

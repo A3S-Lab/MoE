@@ -202,9 +202,13 @@ remains an M6 acceptance item on a confidential-computing host.
 
 These gates accept the resident CPU reference backend, source checkpoint
 loader, tokenizer boundary, packed conversion, Power-backed expert streaming,
-continuous batching, service composition, and public acceptance tooling. They
-do not yet accept a public 30B-A3B numerical or performance run; that status
-requires checked reports from the pinned complete checkpoint.
+continuous batching, service composition, and public acceptance tooling. The
+checked Qwen3-30B-A3B-Base report compares 303,872 logits, 12,288 router
+logits, and 768 selected routes. It records zero numerical, expert-ID, and
+argmax mismatches; the maximum absolute differences are `4.9591064e-5` for
+logits, `3.6239624e-5` for router logits, and `1.1920929e-6` for normalized
+route weights. A separate checked HTTP report records two simultaneous
+requests completing with identical one-token output.
 
 The benchmark's first generation is application-cold with respect to Power's
 expert cache. Integrity verification may already populate the operating-system

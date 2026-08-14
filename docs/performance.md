@@ -103,6 +103,18 @@ the resident baseline (about 3.05 times lower), while the resident path was
 about 6.94 times faster for this CPU-only sample. The OS page cache was
 uncontrolled, so the artifact makes no physical-cold-storage claim.
 
-The pinned Qwen3-30B-A3B-Base performance report remains pending. No public
-throughput or memory claim is made until the complete-checkpoint numerical gate
-passes and the raw family-specific artifact is checked under `evidence/`.
+[`qwen3-moe-public-cpu-windows.json`](../evidence/qwen3-moe-public-cpu-windows.json)
+records the accepted Qwen3-30B-A3B-Base CPU run on the same 20-logical-core
+Windows x86-64 host. The complete-checkpoint numerical gate passed before the
+sample was admitted. With a 4 GiB expert cache, three warm eight-token samples
+averaged `0.1541 tokens/s` and `10.46 s` TTFT. Peak RSS was 26,278,592,512
+bytes, host residency remained below the configured bound at 4,293,947,840
+bytes, and staged in-flight expert bytes peaked at 37,748,992. The report has
+no resident F32 baseline because that would require a second full 30B model;
+the independent pinned oracle is the parity gate. Its OS page cache is
+explicitly uncontrolled.
+
+[`qwen3-moe-public-http-windows.json`](../evidence/qwen3-moe-public-http-windows.json)
+records two simultaneous one-token OpenAI completion requests through the real
+Power HTTP server with `maxConcurrentRequests = 2`; both completed with the
+same output and no server errors.
