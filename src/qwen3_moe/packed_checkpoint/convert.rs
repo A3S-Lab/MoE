@@ -1,11 +1,11 @@
 use std::fs;
 use std::path::Path;
 
-use a3s_power::inference::{InferenceLimits, TensorDescriptor, WeightStore};
+use a3s_power::inference::{InferenceLimits, WeightStore};
 
 use crate::packing::{
-    absolute_destination, convert_dense_tensors, descriptor, ensure_buffer_bound, packed_scalar,
-    validate_matrix_descriptor, write_packed_records,
+    absolute_destination, convert_dense_tensors, convert_fused_expert_tensors, descriptor,
+    ensure_buffer_bound, packed_scalar, validate_matrix_descriptor, write_packed_records,
 };
 use crate::qwen3_moe::checkpoint::dense_tensor_names;
 use crate::{
@@ -282,178 +282,16 @@ fn convert_fused_experts(
     options: Qwen3MoeConversionOptions,
     peak_buffered_bytes: &mut u64,
 ) -> Result<(Vec<String>, PackedScalarType, usize)> {
-    let moe = config.moe_config()?;
-    let section_bytes = matrix_bytes(
-        config.moe_intermediate_size,
-        config.hidden_size,
-        packed_scalar(descriptor(source, &first_sparse_gate_up_name(config)?)?)?,
-    )?;
-    let gate_up_bytes = section_bytes.checked_mul(2).ok_or_else(|| {
-        MoeError::InvalidTensor("fused gate/up expert byte count overflowed".to_string())
-    })?;
-    let mut files = Vec::new();
-    let mut collection_scalar = None;
-    let mut packed_experts = 0_usize;
-
-    for layer in 0..config.num_hidden_layers {
-        if !config.is_sparse_layer(layer) {
-            continue;
-        }
-        let prefix = format!("model.layers.{layer}.mlp.experts");
-        let gate_up_name = format!("{prefix}.gate_up_proj");
-        let down_name = format!("{prefix}.down_proj");
-        let gate_up_descriptor = descriptor(source, &gate_up_name)?;
-        let down_descriptor = descriptor(source, &down_name)?;
-        validate_fused_descriptors(config, gate_up_descriptor, down_descriptor)?;
-        let scalar_type = packed_scalar(gate_up_descriptor)?;
-        if packed_scalar(down_descriptor)? != scalar_type {
-            return Err(MoeError::InvalidTensor(format!(
-                "Qwen3-MoE fused experts in layer {layer} mix scalar types"
-            )));
-        }
-        if collection_scalar
-            .replace(scalar_type)
-            .is_some_and(|value| value != scalar_type)
-        {
-            return Err(MoeError::InvalidTensor(
-                "Qwen3-MoE experts must use one scalar type across the checkpoint".to_string(),
-            ));
-        }
-        let layer_section_bytes = matrix_bytes(
-            config.moe_intermediate_size,
-            config.hidden_size,
-            scalar_type,
-        )?;
-        if layer_section_bytes != section_bytes {
-            return Err(MoeError::InvalidTensor(
-                "Qwen3-MoE expert byte geometry changed between layers".to_string(),
-            ));
-        }
-
-        for first in (0..config.num_experts).step_by(options.experts_per_file) {
-            let end = first
-                .saturating_add(options.experts_per_file)
-                .min(config.num_experts);
-            let mut records = Vec::<(String, Vec<u8>)>::with_capacity(end - first);
-            let mut retained_bytes = 0_u64;
-            for expert in first..end {
-                let gate_up_offset = u64::try_from(expert)
-                    .ok()
-                    .and_then(|expert| expert.checked_mul(gate_up_bytes))
-                    .ok_or_else(|| {
-                        MoeError::InvalidTensor("gate/up expert offset overflowed".to_string())
-                    })?;
-                let down_offset = u64::try_from(expert)
-                    .ok()
-                    .and_then(|expert| expert.checked_mul(section_bytes))
-                    .ok_or_else(|| {
-                        MoeError::InvalidTensor("down expert offset overflowed".to_string())
-                    })?;
-                let source_bytes = gate_up_bytes.checked_add(section_bytes).ok_or_else(|| {
-                    MoeError::InvalidTensor("expert source byte count overflowed".to_string())
-                })?;
-                let record_bytes = source_bytes
-                    .checked_add(PackedExpertRecord::HEADER_BYTES as u64)
-                    .ok_or_else(|| {
-                        MoeError::InvalidTensor("expert record byte count overflowed".to_string())
-                    })?;
-                let buffered = retained_bytes
-                    .checked_add(source_bytes)
-                    .and_then(|bytes| bytes.checked_add(record_bytes))
-                    .ok_or_else(|| {
-                        MoeError::InvalidTensor(
-                            "conversion buffer byte count overflowed".to_string(),
-                        )
-                    })?;
-                ensure_buffer_bound(buffered, options.max_buffer_bytes, "expert shard")?;
-                *peak_buffered_bytes = (*peak_buffered_bytes).max(buffered);
-
-                let gate_up =
-                    source.read_tensor_range(&gate_up_name, gate_up_offset, gate_up_bytes)?;
-                let down = source.read_tensor_range(&down_name, down_offset, section_bytes)?;
-                let split = usize::try_from(section_bytes).map_err(|_| {
-                    MoeError::InvalidTensor("expert section exceeds host memory".to_string())
-                })?;
-                let (gate, up) = gate_up.bytes().split_at(split);
-                let encoded =
-                    PackedExpertRecord::encode_raw(moe, scalar_type, gate, up, down.bytes())?;
-                retained_bytes = retained_bytes
-                    .checked_add(u64::try_from(encoded.len()).map_err(|_| {
-                        MoeError::InvalidTensor("expert record is too large".to_string())
-                    })?)
-                    .ok_or_else(|| {
-                        MoeError::InvalidTensor("retained expert bytes overflowed".to_string())
-                    })?;
-                let layer_number = u32::try_from(layer).map_err(|_| {
-                    MoeError::InvalidConfig("layer index exceeds routing contract".to_string())
-                })?;
-                let expert_number = u32::try_from(expert).map_err(|_| {
-                    MoeError::InvalidConfig("expert index exceeds routing contract".to_string())
-                })?;
-                records.push((
-                    packed_expert_tensor_name(layer_number, expert_number),
-                    encoded,
-                ));
-                packed_experts = packed_experts.checked_add(1).ok_or_else(|| {
-                    MoeError::InvalidConfig("packed expert count overflowed".to_string())
-                })?;
-            }
-            let file = format!(
-                "layer-{layer:05}-experts-{first:05}-{:05}.safetensors",
-                end - 1
-            );
-            write_packed_records(destination.join(&file), &records)?;
-            files.push(file);
-        }
-    }
-    let scalar_type = collection_scalar.ok_or_else(|| {
-        MoeError::InvalidConfig("Qwen3-MoE checkpoint contains no sparse experts".to_string())
-    })?;
-    Ok((files, scalar_type, packed_experts))
-}
-
-fn first_sparse_gate_up_name(config: &Qwen3MoeConfig) -> Result<String> {
-    let layer = (0..config.num_hidden_layers)
-        .find(|layer| config.is_sparse_layer(*layer))
-        .ok_or_else(|| MoeError::InvalidConfig("checkpoint has no sparse layer".to_string()))?;
-    Ok(format!("model.layers.{layer}.mlp.experts.gate_up_proj"))
-}
-
-fn validate_fused_descriptors(
-    config: &Qwen3MoeConfig,
-    gate_up: &TensorDescriptor,
-    down: &TensorDescriptor,
-) -> Result<()> {
-    let gate_up_width = config
-        .moe_intermediate_size
-        .checked_mul(2)
-        .ok_or_else(|| MoeError::InvalidConfig("expert gate/up width overflowed".to_string()))?;
-    let expected_gate_up = [config.num_experts, gate_up_width, config.hidden_size];
-    if gate_up.shape != expected_gate_up {
-        return Err(MoeError::InvalidTensor(format!(
-            "fused expert tensor '{}' must have shape {expected_gate_up:?}, found {:?}",
-            gate_up.name, gate_up.shape
-        )));
-    }
-    let expected_down = [
-        config.num_experts,
-        config.hidden_size,
-        config.moe_intermediate_size,
-    ];
-    if down.shape != expected_down {
-        return Err(MoeError::InvalidTensor(format!(
-            "fused expert tensor '{}' must have shape {expected_down:?}, found {:?}",
-            down.name, down.shape
-        )));
-    }
-    packed_scalar(gate_up)?;
-    packed_scalar(down)?;
-    Ok(())
-}
-
-fn matrix_bytes(rows: usize, columns: usize, scalar: PackedScalarType) -> Result<u64> {
-    rows.checked_mul(columns)
-        .and_then(|elements| elements.checked_mul(scalar.byte_width()))
-        .and_then(|bytes| u64::try_from(bytes).ok())
-        .ok_or_else(|| MoeError::InvalidTensor("expert matrix byte count overflowed".to_string()))
+    let sparse_layers = (0..config.num_hidden_layers)
+        .filter(|layer| config.is_sparse_layer(*layer))
+        .collect::<Vec<_>>();
+    convert_fused_expert_tensors(
+        source,
+        &sparse_layers,
+        config.moe_config()?,
+        |layer| format!("model.layers.{layer}.mlp.experts"),
+        destination,
+        options,
+        peak_buffered_bytes,
+    )
 }
