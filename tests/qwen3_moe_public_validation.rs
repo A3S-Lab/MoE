@@ -139,6 +139,8 @@ fn qwen_validation_cli_reports_passes_and_numerical_failures() {
     );
     let report: serde_json::Value = serde_json::from_slice(&passed.stdout).unwrap();
     assert_eq!(report["schema"], "a3s.moe.qwen3-moe-validation.v1");
+    assert_eq!(report["powerRevision"], "42c6646");
+    assert_revision(&report["moeRevision"]);
     assert_eq!(report["status"], "passed");
     assert_eq!(report["routesChecked"], 8);
     assert_eq!(report["sourceWeightsSha256"].as_str().unwrap().len(), 64);
@@ -159,4 +161,14 @@ fn qwen_validation_cli_reports_passes_and_numerical_failures() {
     let report: serde_json::Value = serde_json::from_slice(&failed.stdout).unwrap();
     assert_eq!(report["status"], "failed");
     assert_eq!(report["logits"]["mismatchCount"], 1);
+}
+
+fn assert_revision(value: &serde_json::Value) {
+    let revision = value.as_str().unwrap();
+    let hash = revision.strip_suffix("-dirty").unwrap_or(revision);
+    assert!(
+        hash == "unknown"
+            || (hash.len() == 40 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())),
+        "unexpected MoE revision: {revision}"
+    );
 }

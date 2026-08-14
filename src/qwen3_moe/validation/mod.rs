@@ -172,6 +172,8 @@ pub async fn validate_public_checkpoint(
         || argmax_token_mismatches > 0;
     Ok(Qwen3MoeValidationReport {
         schema: QWEN3_MOE_VALIDATION_SCHEMA,
+        moe_revision: env!("A3S_MOE_REVISION"),
+        power_revision: env!("A3S_POWER_REVISION"),
         model_id: oracle.model.id,
         model_revision: oracle.model.revision,
         source_weights_sha256,

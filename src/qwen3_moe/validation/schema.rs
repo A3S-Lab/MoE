@@ -70,6 +70,8 @@ impl Default for Qwen3MoeValidationTolerances {
 #[serde(rename_all = "camelCase")]
 pub struct Qwen3MoeValidationReport {
     pub schema: &'static str,
+    pub moe_revision: &'static str,
+    pub power_revision: &'static str,
     pub model_id: String,
     pub model_revision: String,
     pub source_weights_sha256: String,

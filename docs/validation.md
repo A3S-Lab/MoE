@@ -191,7 +191,9 @@ remains an M6 acceptance item on a confidential-computing host.
   captures every prompt logit plus each sparse layer's router logits and
   normalized top-k routes. The Rust validator re-hashes the source inventory,
   verifies the packed checkpoint's source digest/config/tokenizer binding, and
-  compares all values, expert IDs, and token argmaxes.
+  compares all values, expert IDs, and token argmaxes. Its report also records
+  the exact MoE source revision and pinned Power revision used by the validator;
+  a `-dirty` MoE suffix makes a non-release build explicit.
 - Provenance rejection, numerical failure reporting, official split conversion,
   and Qwen3-MoE performance-schema output are covered by deterministic tiny
   regression checkpoints.
