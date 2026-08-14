@@ -187,8 +187,7 @@ impl Qwen36GatedDeltaNet {
                         delta[value_dimension] =
                             (convolved[value_base + value_dimension] - memory) * beta;
                     }
-                    for key_dimension in 0..self.key_head_dim {
-                        let key = normalized_key[key_dimension];
+                    for (key_dimension, key) in normalized_key.iter().copied().enumerate() {
                         let row = state_base + key_dimension * self.value_head_dim;
                         for value_dimension in 0..self.value_head_dim {
                             state[row + value_dimension] += key * delta[value_dimension];

@@ -5,6 +5,8 @@ use crate::{MoeError, Result};
 
 use super::{Qwen36MoeConfig, Qwen36MoeLayerType};
 
+type LinearStateMut<'a> = (&'a mut Option<Vec<f32>>, &'a mut Option<Vec<f32>>);
+
 #[derive(Debug, Clone)]
 pub(super) enum Qwen36MoeLayerCache {
     Linear {
@@ -163,10 +165,7 @@ impl Qwen36MoeCache {
         Ok(())
     }
 
-    pub(super) fn linear_mut(
-        &mut self,
-        layer: usize,
-    ) -> Result<(&mut Option<Vec<f32>>, &mut Option<Vec<f32>>)> {
+    pub(super) fn linear_mut(&mut self, layer: usize) -> Result<LinearStateMut<'_>> {
         match self.layers.get_mut(layer) {
             Some(Qwen36MoeLayerCache::Linear {
                 conv_state,

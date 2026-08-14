@@ -171,8 +171,10 @@ mod tests {
         let source = Qwen36MoeCheckpoint::open(&source_root).unwrap();
         let resident = source.load_cpu_resident().unwrap();
         let packed_root = directory.path().join("packed");
-        let mut limits = InferenceLimits::default();
-        limits.max_concurrent_requests = 2;
+        let limits = InferenceLimits {
+            max_concurrent_requests: 2,
+            ..InferenceLimits::default()
+        };
         let report = source
             .convert_to_packed(
                 &packed_root,
