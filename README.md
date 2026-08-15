@@ -117,22 +117,26 @@ M7 Qwen3-MoE path, and M8 Qwen3.6 text path are implemented and tested:
 - Qwen3.6 ragged route-unioned batching, typed backend composition, automatic
   `qwen3_5_moe` detection, concurrent OpenAI completion, SSE, benchmark
   evidence, and a provenance-bound public F32-operation validator.
+- Device-native Qwen3.6 dense, Gated DeltaNet, attention, shared-expert, and
+  routed-expert execution on Power-resolved accelerators, with an explicit
+  no-fallback CUDA public-checkpoint parity and performance report.
 
-The Qwen3.6 implementation currently exposes text generation only and its
-streaming loader currently requires a CPU Power runtime. It does not advertise
-vision, video, or MTP inference, and it does not claim that a present GPU is
-used. The HTTP transport, OpenAI response framing, authentication, rate limiting,
-metrics, and shutdown lifecycle remain owned by Power. Dense weights remain
-resident in the current CPU path. The exact pinned Qwen3.6 checkpoint has now
-passed all M8 acceptance gates on the checked 20-logical-core Windows host.
-Its three warm eight-token samples average `0.194616 tokens/s` end to end and
-`11.664 s` TTFT with a 4 GiB Power expert cache; the arithmetic mean of the
-derived post-first-token decode rates is `0.228730 tokens/s`. The checked
+The Qwen3.6 implementation currently exposes text generation only. It does not
+advertise vision, video, or MTP inference. The HTTP transport, OpenAI response
+framing, authentication, rate limiting, metrics, and shutdown lifecycle remain
+owned by Power. The exact pinned checkpoint passed independent-oracle parity
+on `cuda:0` without CPU fallback. On the checked 20-logical-core Windows host
+with an RTX 4090, an 8 GiB Power device cache, no host expert cache, and 16
+generated tokens, three warm samples average `0.263611 tokens/s` end to end and
+`3.943 s` TTFT. Their derived post-first-token decode rates average
+`0.264298 tokens/s`. This is the current lossless F32 execution baseline, not a
+quantized or DSpark-accelerated result. The checked
 [validation](evidence/qwen3.6-35b-a3b-public-validation.json),
-[performance](evidence/qwen3.6-35b-a3b-public-cpu-windows.json), and
+[CUDA performance](evidence/qwen3.6-35b-a3b-public-cuda-windows.json),
+[CPU performance](evidence/qwen3.6-35b-a3b-public-cpu-windows.json), and
 [two-request HTTP](evidence/qwen3.6-35b-a3b-public-http-windows.json) artifacts
-retain the raw values and exact revisions. These are CPU-path measurements,
-not claims about the host's present RTX 4090.
+retain the raw values and exact revisions. Public-checkpoint Metal parity
+remains pending.
 
 The complete pinned 13.8 GB OLMoE public
 checkpoint has passed Transformers-to-Rust numerical validation, bounded
@@ -146,12 +150,12 @@ fine-tune. Checked raw evidence lives under [`evidence/`](evidence/).
 
 ```text
 a3s-moe (model owner)
-  config / tensor names / OLMoE + Qwen3-MoE + Qwen3.6 math / tokenizer / generation
+  model math / tokenizer / generation / speculative drafter adapters
                          |
-                         | exact routes + atomic weight requests
+                         | exact routes + atomic weights + draft/verify contract
                          v
 a3s-power (runtime owner)
-  admission / batching / storage-RAM-device residency / integrity / TEE / API
+  admission / batching / residency / speculative scheduling / integrity / TEE / API
 ```
 
 There is one residency hierarchy. Model code consumes weights returned by
@@ -159,7 +163,9 @@ Power and does not introduce a second expert cache. Each packed expert remains
 an opaque `U8` SafeTensor to Power; this crate validates and interprets its
 versioned header and exact scalar payload.
 
-See [Architecture](docs/architecture.md) for invariants and the delivery plan.
+See [Architecture](docs/architecture.md) for invariants and the delivery plan,
+and [Model-neutral speculative decoding](docs/speculative-decoding.md) for the
+cross-architecture DSpark boundary and acceptance gates.
 
 ## Development
 
@@ -408,11 +414,22 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
   > qwen3.6-35b-a3b-performance.json
 ```
 
+The checked CUDA run uses an explicit device request and bounded device cache:
+
+```shell
+cargo run --release --features benchmark,cuda --bin a3s-moe-bench -- \
+  /models/Qwen3.6-35B-A3B-a3s \
+  --prompt "Hello" --max-tokens 16 --warm-samples 3 \
+  --device cuda:0 --host-cache-mib 0 --device-cache-mib 8192 \
+  --checkpoint-label qwen3.6-35b-a3b-bf16 \
+  > qwen3.6-35b-a3b-cuda-performance.json
+```
+
 The first sample starts with an empty Power expert cache. Warm samples retain
 only the configured bounded cache. The report explicitly labels the operating
 system page cache as uncontrolled; it does not call that condition physical
-cold I/O. The checked Qwen3.6 artifact reports `0.161215 tokens/s` for the first
-generation and `0.194616 tokens/s` for the three-sample warm mean. See
+cold I/O. The checked Qwen3.6 CPU artifact reports a `0.194616 tokens/s` warm
+mean; the checked CUDA artifact reports a `0.263611 tokens/s` warm mean. See
 [Performance Evidence](docs/performance.md) for the measurement boundary and
 comparison rules.
 

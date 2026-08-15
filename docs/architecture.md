@@ -271,8 +271,12 @@ fine-tune. It does not present the base model as instruction-tuned.
   on Power's resolved CPU, CUDA, or Metal tensor device; expert staging uses
   the fastest configured tier; explicit accelerators fail closed; and `auto`
   exposes content-free CPU fallback evidence.
-- M5 pending acceptance: run CUDA and Metal parity against the public oracle
-  on matching hardware and check in dtype-specific evidence.
+- M5 accepted CUDA slice: the pinned Qwen3.6 checkpoint passes the independent
+  public oracle on `cuda:0` without CPU fallback, and a bounded 8 GiB device
+  cache performance artifact is checked in.
+- M5 pending acceptance: run Metal parity against the public oracle on matching
+  hardware and replace fallback-heavy F32 execution with measured optimized
+  kernels without weakening the same numerical gate.
 - M6 implemented foundation: bounded-chunk encryption and authenticated random
   access cover dense and expert collections; a pinned top manifest binds all
   plaintext metadata; the typed service source reuses Power residency without
@@ -322,7 +326,7 @@ fine-tune. It does not present the base model as instruction-tuned.
   state, per-head Q/K normalization, partial RoPE, attention output gates,
   normalized Top-8 routing over 256 experts, and the gated shared expert.
 - Implemented residency: the common bounded fused-expert converter produces
-  atomic records; resident and Power-streamed CPU paths share transactional
+  atomic records; resident and Power-streamed paths share transactional
   mixed cache state, exact routes, greedy generation, ragged route-unioned
   batches, and the common continuous scheduler.
 - Implemented service and evidence tooling: architecture auto-detection,
@@ -332,9 +336,20 @@ fine-tune. It does not present the base model as instruction-tuned.
 - Public acceptance is complete: the exact source checkpoint passed full-file
   hashing, conversion, independent-oracle parity, two simultaneous real HTTP
   requests, and first/warm measurement on the target host. The checked 4 GiB
-  cache run averaged `0.194616 tokens/s` end to end across three warm samples.
-  The current implementation is CPU-only and makes no CUDA-use claim for the
-  NVIDIA device present in that host.
+  CPU cache run averaged `0.194616 tokens/s` end to end across three warm
+  samples. The checked CUDA path passes the same oracle without fallback and
+  averages `0.263611 tokens/s` across three 16-token warm samples with an 8 GiB
+  device cache. Metal public-checkpoint acceptance remains part of M5.
+
+### M9: Model-neutral Speculative Decoding
+
+Power owns draft/verify orchestration, exact acceptance, transactional state
+boundaries, confidence and hardware-aware scheduling, cancellation, and
+content-free telemetry. Model crates own trained draft backbones and heads,
+checkpoint tensor mappings, target block verification, and architecture state
+such as KV, convolution, or recurrent caches. The contract applies to every
+compatible architecture; it is not a Qwen3.8-specific path. See
+[Model-neutral speculative decoding](speculative-decoding.md).
 
 ## Acceptance Gates
 

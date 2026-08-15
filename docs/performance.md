@@ -88,9 +88,11 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
   > qwen3.6-35b-a3b-performance.json
 ```
 
-The current Qwen3.6 loader intentionally accepts only `--device cpu`. A CUDA
-device present in the host is not part of this result until a separate
-accelerator implementation passes the same oracle and evidence gates.
+Accelerator evidence uses the same model digest and oracle gate while selecting
+the device and its independent cache bound explicitly. The checked Qwen3.6
+CUDA command uses `--features benchmark,cuda`, `--device cuda:0`,
+`--host-cache-mib 0`, and `--device-cache-mib 8192`. An explicit accelerator
+request fails rather than silently falling back to CPU.
 
 Artifacts use `a3s.moe.olmoe-performance.v1` or
 `a3s.moe.qwen3-moe-performance.v1`; Qwen3.6 reports use
@@ -114,7 +116,7 @@ equivalent. `packedCheckpoint` is a caller-provided path-free label (or the
 checkpoint directory name by default); the logical weights digest is the
 machine-independent identity.
 
-## Checked Public CPU Run
+## Checked Public Runs
 
 [`olmoe-public-cpu-windows.json`](../evidence/olmoe-public-cpu-windows.json)
 records a complete OLMoE-1B-7B run on a 20-logical-core Windows x86-64 host.
@@ -156,6 +158,19 @@ post-first-token decode rates were `0.203932`, `0.221544`, and
 23,509,303,296 bytes, host residency was 4,290,816,640 bytes, and staged
 in-flight expert bytes peaked at 25,166,080. The operating-system page cache
 was uncontrolled.
+
+[`qwen3.6-35b-a3b-public-cuda-windows.json`](../evidence/qwen3.6-35b-a3b-public-cuda-windows.json)
+records the same packed Qwen3.6 text checkpoint on the host's RTX 4090 through
+Power's explicit `cuda:0` path, with no automatic CPU fallback, no host expert
+cache, and an 8 GiB device expert cache. For 16 generated tokens, the three
+warm samples measured `0.268320`, `0.264965`, and `0.257548 tokens/s`, for an
+end-to-end arithmetic mean of `0.263611 tokens/s` and mean TTFT of `3.943 s`.
+Their derived post-first-token decode rates average `0.264298 tokens/s`. The
+first generation measured `0.162680 tokens/s`; the retained cache still read
+25,807,815,040 bytes across the warm samples because the 16-token expert
+working set exceeds the 8 GiB bound. Peak process RSS was 14,239,883,264 bytes.
+This artifact is the unquantized F32 execution baseline and contains no DSpark
+drafter or speculative acceptance.
 
 [`qwen3.6-35b-a3b-public-http-windows.json`](../evidence/qwen3.6-35b-a3b-public-http-windows.json)
 records two simultaneous one-token requests through the real Power server.

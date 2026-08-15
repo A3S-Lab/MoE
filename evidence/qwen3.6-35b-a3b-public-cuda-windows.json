@@ -1,0 +1,176 @@
+{
+  "schema": "a3s.moe.qwen3.6-moe-performance.v1",
+  "generatedAt": "2026-08-15T05:27:01.009228+00:00",
+  "implementation": {
+    "crateName": "a3s-moe",
+    "crateVersion": "0.1.0",
+    "moeRevision": "7f19d4429fc46de23161ba223c797a789c49946c",
+    "powerRevision": "245ca1c60639594d1236bdf149f9974301171ccd",
+    "execution": "f32-dense-power-streamed-experts"
+  },
+  "model": {
+    "name": "qwen3.6-35b-a3b-benchmark",
+    "family": "qwen3_5_moe",
+    "weightsSha256": "3009220dfee6fab4a06ff5161c1b15e4d433a07823dcd7aae4b0e3333ca6ff71",
+    "packedCheckpoint": "qwen3.6-35b-a3b-bf16",
+    "packedBytes": 69335962985
+  },
+  "system": {
+    "os": "windows",
+    "architecture": "x86_64",
+    "logicalParallelism": 20,
+    "processor": "Intel64 Family 6 Model 143 Stepping 8, GenuineIntel"
+  },
+  "configuration": {
+    "promptBytes": 5,
+    "promptTokens": 1,
+    "maxNewTokens": 16,
+    "warmSamples": 3,
+    "temperature": 0.0,
+    "hostCacheBytes": 0,
+    "deviceCacheBytes": 8589934592,
+    "effectiveDeviceCacheBytes": 8589934592,
+    "requestedDevice": {
+      "kind": "cuda",
+      "ordinal": 0
+    },
+    "resolvedDevice": {
+      "kind": "cuda",
+      "ordinal": 0
+    },
+    "automaticCpuFallback": false
+  },
+  "cacheState": {
+    "powerFirstGeneration": "empty expert residency cache",
+    "powerWarmGenerations": "retained bounded expert residency cache",
+    "operatingSystemPageCache": "uncontrolled; checkpoint integrity verification may warm file pages"
+  },
+  "load": {
+    "packedStreamingNs": 109554059700,
+    "residentBaselineNs": null
+  },
+  "firstGeneration": {
+    "totalNs": 98352603800,
+    "timeToFirstTokenNs": 4258081300,
+    "modelPromptEvalNs": 4193195000,
+    "generatedTokens": 16,
+    "tokensPerSecond": 0.1626799838724758,
+    "tokenIds": [
+      11,
+      271,
+      40,
+      1044,
+      4313,
+      310,
+      958,
+      279,
+      1510,
+      447,
+      63,
+      1654,
+      314,
+      279,
+      1510,
+      35044
+    ],
+    "doneReason": "length"
+  },
+  "warmGenerations": [
+    {
+      "totalNs": 59630364900,
+      "timeToFirstTokenNs": 3826127100,
+      "modelPromptEvalNs": 3754060300,
+      "generatedTokens": 16,
+      "tokensPerSecond": 0.2683196728182356,
+      "tokenIds": [
+        11,
+        271,
+        40,
+        1044,
+        4313,
+        310,
+        958,
+        279,
+        1510,
+        447,
+        63,
+        1654,
+        314,
+        279,
+        1510,
+        35044
+      ],
+      "doneReason": "length"
+    },
+    {
+      "totalNs": 60385333000,
+      "timeToFirstTokenNs": 3966105300,
+      "modelPromptEvalNs": 3903204900,
+      "generatedTokens": 16,
+      "tokensPerSecond": 0.2649650040018824,
+      "tokenIds": [
+        11,
+        271,
+        40,
+        1044,
+        4313,
+        310,
+        958,
+        279,
+        1510,
+        447,
+        63,
+        1654,
+        314,
+        279,
+        1510,
+        35044
+      ],
+      "doneReason": "length"
+    },
+    {
+      "totalNs": 62124299900,
+      "timeToFirstTokenNs": 4036833500,
+      "modelPromptEvalNs": 3972519600,
+      "generatedTokens": 16,
+      "tokensPerSecond": 0.2575481739955994,
+      "tokenIds": [
+        11,
+        271,
+        40,
+        1044,
+        4313,
+        310,
+        958,
+        279,
+        1510,
+        447,
+        63,
+        1654,
+        314,
+        279,
+        1510,
+        35044
+      ],
+      "doneReason": "length"
+    }
+  ],
+  "warmSummary": {
+    "samples": 3,
+    "meanTotalNs": 60713332600.0,
+    "meanTimeToFirstTokenNs": 3943021966.6666665,
+    "meanTokensPerSecond": 0.2636109502719058
+  },
+  "placement": {
+    "firstStorageReads": 2492,
+    "firstStorageBytesRead": 15678467840,
+    "warmStorageReads": 4102,
+    "warmStorageBytesRead": 25807815040,
+    "hostCacheHits": 0,
+    "hostResidentBytes": 0,
+    "hostEvictions": 0,
+    "stagedPeakInflightBytes": 25166080
+  },
+  "processPeakRssBytes": 14239883264,
+  "residentBaseline": null
+}

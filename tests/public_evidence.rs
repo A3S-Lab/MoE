@@ -137,14 +137,24 @@ fn checked_qwen36_public_validation_evidence_passes_every_numeric_gate() {
         "../evidence/qwen3.6-35b-a3b-public-validation.json"
     ))
     .unwrap();
-    assert_eq!(evidence["schema"], "a3s.moe.qwen3.6-35b-a3b-validation.v1");
+    assert_eq!(evidence["schema"], "a3s.moe.qwen3.6-35b-a3b-validation.v2");
     assert_eq!(evidence["status"], "passed");
     assert_eq!(
         evidence["moeRevision"],
-        "f844f44a8d8ef3ec55a9e13209bfede765901ad9"
+        "1ac298e12b8cc617486130aad405afd23961eff3"
     );
-    assert_eq!(evidence["powerRevision"], "42c6646");
+    assert_eq!(
+        evidence["powerRevision"],
+        "245ca1c60639594d1236bdf149f9974301171ccd"
+    );
     assert_eq!(evidence["modelId"], "Qwen/Qwen3.6-35B-A3B");
+    assert_eq!(evidence["requestedDevice"]["kind"], "cuda");
+    assert_eq!(evidence["requestedDevice"]["ordinal"], 0);
+    assert_eq!(evidence["resolvedDevice"]["kind"], "cuda");
+    assert_eq!(evidence["resolvedDevice"]["ordinal"], 0);
+    assert_eq!(evidence["automaticCpuFallback"], false);
+    assert_eq!(evidence["hostCacheBytes"], 0);
+    assert_eq!(evidence["deviceCacheBytes"], 2_147_483_648_u64);
     assert_eq!(evidence["promptTokens"], 5);
     assert_eq!(evidence["linearAttentionLayers"], 30);
     assert_eq!(evidence["fullAttentionLayers"], 10);
@@ -155,6 +165,47 @@ fn checked_qwen36_public_validation_evidence_passes_every_numeric_gate() {
     assert_eq!(evidence["routeExpertMismatches"], 0);
     assert_eq!(evidence["routeOrderMismatches"], 12);
     assert_eq!(evidence["argmaxTokenMismatches"], 0);
+}
+
+#[test]
+fn checked_qwen36_public_cuda_evidence_is_bounded_and_path_free() {
+    let evidence: Value = serde_json::from_str(include_str!(
+        "../evidence/qwen3.6-35b-a3b-public-cuda-windows.json"
+    ))
+    .unwrap();
+    assert_eq!(evidence["schema"], "a3s.moe.qwen3.6-moe-performance.v1");
+    assert_eq!(
+        evidence["implementation"]["moeRevision"],
+        "7f19d4429fc46de23161ba223c797a789c49946c"
+    );
+    assert_eq!(
+        evidence["implementation"]["powerRevision"],
+        "245ca1c60639594d1236bdf149f9974301171ccd"
+    );
+    assert_eq!(evidence["model"]["family"], "qwen3_5_moe");
+    assert_eq!(evidence["configuration"]["promptTokens"], 1);
+    assert_eq!(evidence["configuration"]["maxNewTokens"], 16);
+    assert_eq!(evidence["configuration"]["requestedDevice"]["kind"], "cuda");
+    assert_eq!(evidence["configuration"]["resolvedDevice"]["kind"], "cuda");
+    assert_eq!(evidence["configuration"]["resolvedDevice"]["ordinal"], 0);
+    assert_eq!(evidence["configuration"]["automaticCpuFallback"], false);
+    assert_eq!(evidence["configuration"]["hostCacheBytes"], 0);
+    assert_eq!(
+        evidence["configuration"]["effectiveDeviceCacheBytes"],
+        8_589_934_592_u64
+    );
+    assert_eq!(evidence["warmSummary"]["samples"], 3);
+    assert!(evidence["warmSummary"]["meanTokensPerSecond"]
+        .as_f64()
+        .is_some_and(|value| (0.26..0.27).contains(&value)));
+    assert_eq!(evidence["residentBaseline"], Value::Null);
+    assert_eq!(evidence["placement"]["hostResidentBytes"], 0);
+    assert!(evidence["processPeakRssBytes"].as_u64().unwrap() < 16 * 1024 * 1024 * 1024_u64);
+    for sample in evidence["warmGenerations"].as_array().unwrap() {
+        assert_eq!(evidence["firstGeneration"]["tokenIds"], sample["tokenIds"]);
+    }
+    let label = evidence["model"]["packedCheckpoint"].as_str().unwrap();
+    assert!(!label.contains('/') && !label.contains('\\') && !label.contains(':'));
 }
 
 #[test]

@@ -136,7 +136,7 @@ fn qwen36_validation_cli_reports_passes_and_numerical_failures() {
     assert_eq!(report["schema"], "a3s.moe.qwen3.6-35b-a3b-validation.v2");
     assert_eq!(
         report["powerRevision"],
-        "245ca1c60639594d1236bdf149f9974301171ccd"
+        "f7035d92bdcd4a243c41fe8227b627ec93143a0b"
     );
     assert_revision(&report["moeRevision"]);
     assert_eq!(report["requestedDevice"]["kind"], "cpu");
