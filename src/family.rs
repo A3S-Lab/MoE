@@ -22,6 +22,7 @@ const QWEN3_MOE_MAX_INFLIGHT_BYTES: u64 = 512 * 1024 * 1024;
 const QWEN36_MOE_PUBLIC_WEIGHT_FILE_BYTES: u64 = 71_903_776_776;
 const QWEN36_MOE_MAX_MODEL_FILES: usize = 16_384;
 const QWEN36_MOE_MAX_MODEL_BYTES: u64 = 80 * GIB;
+const QWEN36_MOE_MAX_RESIDENT_WEIGHT_BYTES: u64 = 20 * GIB;
 const QWEN36_MOE_MAX_STATE_BYTES: u64 = 48 * GIB;
 const QWEN36_MOE_MAX_TENSOR_ELEMENTS: usize = 640 * 1024 * 1024;
 const QWEN36_MOE_MAX_STAGED_WEIGHTS: usize = 256;
@@ -121,6 +122,12 @@ impl MoeArchitecture {
                 // sessions require just over 40 GiB of bounded state.
                 limits.max_model_files = QWEN36_MOE_MAX_MODEL_FILES;
                 limits.max_model_bytes = QWEN36_MOE_MAX_MODEL_BYTES;
+                // The public checkpoint has about 9.1 GiB of fixed F32
+                // weights. A 20 GiB hard bound lets 24 GiB accelerators use
+                // a meaningful expert cache while preserving runtime
+                // headroom; the operator-selected cache remains separately
+                // bounded by ResidencyPolicy.
+                limits.max_resident_weight_bytes = QWEN36_MOE_MAX_RESIDENT_WEIGHT_BYTES;
                 limits.max_state_bytes = QWEN36_MOE_MAX_STATE_BYTES;
                 limits.max_tensor_elements = QWEN36_MOE_MAX_TENSOR_ELEMENTS;
             }
@@ -282,6 +289,13 @@ mod tests {
         let residency = MoeArchitecture::Qwen35Moe.residency_policy();
         assert!(limits.max_model_bytes >= QWEN36_MOE_PUBLIC_WEIGHT_FILE_BYTES);
         assert!(limits.max_model_files >= 40 * 256);
+        assert_eq!(
+            limits.max_resident_weight_bytes,
+            QWEN36_MOE_MAX_RESIDENT_WEIGHT_BYTES
+        );
+        assert!(
+            limits.max_resident_weight_bytes > InferenceLimits::default().max_resident_weight_bytes
+        );
         assert!(limits.max_state_bytes >= FULL_SERVICE_KV_BYTES);
         assert!(limits.max_tensor_elements >= 256 * 2 * 512 * 2_048);
         assert!(residency.max_prefetch_items >= 256);
