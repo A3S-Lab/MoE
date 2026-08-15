@@ -116,11 +116,6 @@ impl Qwen36MoePackedCheckpoint {
     }
 
     pub fn load_streaming(&self, policy: ResidencyPolicy) -> Result<Qwen36MoeStreamingModel> {
-        if !self.runtime.device().tensor_device().is_cpu() {
-            return Err(MoeError::InvalidConfig(
-                "Qwen3.6 streaming currently requires a CPU Power runtime".to_string(),
-            ));
-        }
         let fixed_weight_bytes = f32_materialized_bytes(&self.dense_store)?;
         let hierarchy = WeightHierarchy::new_with_fixed_weight_bytes(
             Arc::clone(&self.expert_store),

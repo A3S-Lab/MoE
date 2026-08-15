@@ -5,13 +5,13 @@ use crate::{MoeError, Result};
 
 use super::{Qwen36MoeConfig, Qwen36MoeLayerType};
 
-type LinearStateMut<'a> = (&'a mut Option<Vec<f32>>, &'a mut Option<Vec<f32>>);
+type LinearStateMut<'a> = (&'a mut Option<Tensor>, &'a mut Option<Tensor>);
 
 #[derive(Debug, Clone)]
 pub(super) enum Qwen36MoeLayerCache {
     Linear {
-        conv_state: Option<Vec<f32>>,
-        recurrent_state: Option<Vec<f32>>,
+        conv_state: Option<Tensor>,
+        recurrent_state: Option<Tensor>,
     },
     Full {
         kv: LayerKvCache,
@@ -60,49 +60,50 @@ impl Qwen36MoeCache {
 
     pub fn resident_bytes(&self) -> Result<u64> {
         self.layers.iter().try_fold(0_u64, |total, layer| {
-            let bytes = match layer {
-                Qwen36MoeLayerCache::Linear {
-                    conv_state,
-                    recurrent_state,
-                } => conv_state
-                    .iter()
-                    .chain(recurrent_state)
-                    .try_fold(0_u64, |bytes, state| {
-                        let state_bytes = state
-                            .len()
-                            .checked_mul(size_of::<f32>())
-                            .and_then(|value| u64::try_from(value).ok())
-                            .ok_or_else(|| {
+            let bytes =
+                match layer {
+                    Qwen36MoeLayerCache::Linear {
+                        conv_state,
+                        recurrent_state,
+                    } => conv_state.iter().chain(recurrent_state).try_fold(
+                        0_u64,
+                        |bytes, tensor| {
+                            let state_bytes = tensor
+                                .elem_count()
+                                .checked_mul(tensor.dtype().size_in_bytes())
+                                .and_then(|value| u64::try_from(value).ok())
+                                .ok_or_else(|| {
+                                    MoeError::InvalidTensor(
+                                        "linear-attention state byte count overflowed".to_string(),
+                                    )
+                                })?;
+                            bytes.checked_add(state_bytes).ok_or_else(|| {
                                 MoeError::InvalidTensor(
                                     "linear-attention state byte count overflowed".to_string(),
                                 )
-                            })?;
-                        bytes.checked_add(state_bytes).ok_or_else(|| {
-                            MoeError::InvalidTensor(
-                                "linear-attention state byte count overflowed".to_string(),
-                            )
-                        })
-                    })?,
-                Qwen36MoeLayerCache::Full { kv } => [&kv.key, &kv.value]
-                    .into_iter()
-                    .flatten()
-                    .try_fold(0_u64, |bytes, tensor: &Tensor| {
-                        let tensor_bytes = tensor
-                            .elem_count()
-                            .checked_mul(tensor.dtype().size_in_bytes())
-                            .and_then(|value| u64::try_from(value).ok())
-                            .ok_or_else(|| {
+                            })
+                        },
+                    )?,
+                    Qwen36MoeLayerCache::Full { kv } => [&kv.key, &kv.value]
+                        .into_iter()
+                        .flatten()
+                        .try_fold(0_u64, |bytes, tensor: &Tensor| {
+                            let tensor_bytes = tensor
+                                .elem_count()
+                                .checked_mul(tensor.dtype().size_in_bytes())
+                                .and_then(|value| u64::try_from(value).ok())
+                                .ok_or_else(|| {
+                                    MoeError::InvalidTensor(
+                                        "attention cache byte count overflowed".to_string(),
+                                    )
+                                })?;
+                            bytes.checked_add(tensor_bytes).ok_or_else(|| {
                                 MoeError::InvalidTensor(
                                     "attention cache byte count overflowed".to_string(),
                                 )
-                            })?;
-                        bytes.checked_add(tensor_bytes).ok_or_else(|| {
-                            MoeError::InvalidTensor(
-                                "attention cache byte count overflowed".to_string(),
-                            )
-                        })
-                    })?,
-            };
+                            })
+                        })?,
+                };
             total.checked_add(bytes).ok_or_else(|| {
                 MoeError::InvalidTensor("cache aggregate byte count overflowed".to_string())
             })
@@ -261,7 +262,8 @@ mod tests {
     fn heterogeneous_cache_is_transactional_and_resettable() {
         let mut cache = Qwen36MoeCache::new(&config());
         cache.validate_step(4, 1, 3).unwrap();
-        *cache.linear_mut(0).unwrap().0 = Some(vec![1.0; 4]);
+        *cache.linear_mut(0).unwrap().0 =
+            Some(Tensor::from_vec(vec![1.0_f32; 4], 4, &candle_core::Device::Cpu).unwrap());
         assert_eq!(cache.resident_bytes().unwrap(), 16);
         cache.commit_step(1, 3);
         assert!(cache.validate_step(4, 2, 1).is_err());

@@ -1,3 +1,4 @@
+use a3s_power::inference::{DevicePreference, RuntimeDeviceIdentity};
 use serde::{Deserialize, Serialize};
 
 pub use crate::validation::{
@@ -7,7 +8,7 @@ pub use crate::validation::{
 };
 
 pub const QWEN36_MOE_PUBLIC_ORACLE_SCHEMA: &str = "a3s.moe.qwen3.6-35b-a3b-public-oracle.v1";
-pub const QWEN36_MOE_VALIDATION_SCHEMA: &str = "a3s.moe.qwen3.6-35b-a3b-validation.v1";
+pub const QWEN36_MOE_VALIDATION_SCHEMA: &str = "a3s.moe.qwen3.6-35b-a3b-validation.v2";
 pub const QWEN36_MOE_PUBLIC_MODEL_ID: &str = "Qwen/Qwen3.6-35B-A3B";
 pub const QWEN36_MOE_PUBLIC_MODEL_REVISION: &str = "995ad96eacd98c81ed38be0c5b274b04031597b0";
 pub const QWEN36_MOE_TRANSFORMERS_REVISION: &str = "918dbf131d0df5b46e3f6e1d96174d62aa4d16d6";
@@ -72,6 +73,11 @@ pub struct Qwen36MoeValidationReport {
     pub schema: &'static str,
     pub moe_revision: &'static str,
     pub power_revision: &'static str,
+    pub requested_device: DevicePreference,
+    pub resolved_device: RuntimeDeviceIdentity,
+    pub automatic_cpu_fallback: bool,
+    pub host_cache_bytes: u64,
+    pub device_cache_bytes: u64,
     pub model_id: String,
     pub model_revision: String,
     pub source_weights_sha256: String,

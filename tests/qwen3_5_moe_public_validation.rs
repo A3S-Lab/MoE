@@ -133,9 +133,17 @@ fn qwen36_validation_cli_reports_passes_and_numerical_failures() {
         String::from_utf8_lossy(&passed.stderr)
     );
     let report: serde_json::Value = serde_json::from_slice(&passed.stdout).unwrap();
-    assert_eq!(report["schema"], "a3s.moe.qwen3.6-35b-a3b-validation.v1");
-    assert_eq!(report["powerRevision"], "42c6646");
+    assert_eq!(report["schema"], "a3s.moe.qwen3.6-35b-a3b-validation.v2");
+    assert_eq!(
+        report["powerRevision"],
+        "245ca1c60639594d1236bdf149f9974301171ccd"
+    );
     assert_revision(&report["moeRevision"]);
+    assert_eq!(report["requestedDevice"]["kind"], "cpu");
+    assert_eq!(report["resolvedDevice"]["kind"], "cpu");
+    assert_eq!(report["automaticCpuFallback"], false);
+    assert_eq!(report["hostCacheBytes"], 1024 * 1024);
+    assert_eq!(report["deviceCacheBytes"], 0);
     assert_eq!(report["status"], "passed");
     assert_eq!(report["linearAttentionLayers"], 3);
     assert_eq!(report["fullAttentionLayers"], 1);

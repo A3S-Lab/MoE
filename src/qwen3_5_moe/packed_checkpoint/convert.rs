@@ -124,9 +124,10 @@ impl Qwen36MoeCheckpoint {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     use a3s_power::inference::{
-        DevicePreference, EmbeddedRuntime, InferenceLimits, ResidencyPolicy,
+        DevicePreference, EmbeddedRuntime, InferenceLimits, ResidencyPolicy, RoutedExpertBatch,
     };
     use approx::assert_abs_diff_eq;
     use candle_core::{Device, Tensor};
@@ -138,6 +139,117 @@ mod tests {
 
     #[tokio::test]
     async fn bounded_text_conversion_matches_the_resident_mixed_decoder() {
+        let fixture = tiny_packed_fixture();
+        let resident = fixture.source.load_cpu_resident().unwrap();
+        assert_eq!(fixture.report.dense_files, 64);
+        assert_eq!(fixture.report.expert_files, 8);
+        assert_eq!(fixture.report.packed_experts, 12);
+        assert!(fixture.report.peak_buffered_bytes <= 1024);
+
+        let runtime = EmbeddedRuntime::new(DevicePreference::Cpu, fixture.limits.clone()).unwrap();
+        let packed =
+            Qwen36MoePackedCheckpoint::open(&fixture.packed_root, runtime.clone()).unwrap();
+        assert_eq!(
+            packed.manifest().capabilities,
+            [Qwen36MoePackedManifest::TEXT_GENERATION_CAPABILITY]
+        );
+        assert!(packed.load_tokenizer().is_err());
+        let streaming = packed
+            .load_streaming(ResidencyPolicy {
+                host_cache_bytes: 512,
+                max_background_inflight_bytes: 1024,
+                ..ResidencyPolicy::default()
+            })
+            .unwrap();
+        let input = Tensor::from_slice(&[1_u32, 4, 2], (1, 3), &Device::Cpu).unwrap();
+        let expected = resident.forward(&input, &mut resident.new_cache()).unwrap();
+        let cancellation = CancellationToken::new();
+        let permit = runtime.begin(&cancellation).unwrap();
+        let actual = streaming
+            .forward(&input, &mut streaming.new_cache(), &permit, &cancellation)
+            .await
+            .unwrap();
+        compare(&actual.logits, &expected.logits);
+        compare_routes(&actual.layer_routes, &expected.layer_routes, 1e-5);
+        assert_eq!(actual.layer_staging.len(), 4);
+
+        let first = Tensor::from_slice(&[1_u32, 2], (1, 2), &Device::Cpu).unwrap();
+        let second = Tensor::from_slice(&[4_u32], (1, 1), &Device::Cpu).unwrap();
+        let expected_first = resident.forward(&first, &mut resident.new_cache()).unwrap();
+        let expected_second = resident
+            .forward(&second, &mut resident.new_cache())
+            .unwrap();
+        let mut first_cache = streaming.new_cache();
+        let mut second_cache = streaming.new_cache();
+        let mut rows = [
+            Qwen36MoeStreamingBatchRow::new(&first, &mut first_cache),
+            Qwen36MoeStreamingBatchRow::new(&second, &mut second_cache),
+        ];
+        let batched = streaming
+            .forward_batch(&mut rows, &permit, &cancellation)
+            .await
+            .unwrap();
+        compare(&batched.rows[0].logits, &expected_first.logits);
+        compare(&batched.rows[1].logits, &expected_second.logits);
+        assert_eq!(batched.layer_union_routes.len(), 4);
+        assert_eq!(first_cache.position(), 2);
+        assert_eq!(second_cache.position(), 1);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[tokio::test]
+    async fn packed_streaming_executes_on_cuda_and_matches_cpu() {
+        let fixture = tiny_packed_fixture();
+        let resident = fixture.source.load_cpu_resident().unwrap();
+        let cpu_input = Tensor::from_slice(&[1_u32, 4, 2], (1, 3), &Device::Cpu).unwrap();
+        let expected = resident
+            .forward(&cpu_input, &mut resident.new_cache())
+            .unwrap();
+
+        let runtime = EmbeddedRuntime::new(
+            DevicePreference::Cuda { ordinal: 0 },
+            fixture.limits.clone(),
+        )
+        .unwrap();
+        let packed =
+            Qwen36MoePackedCheckpoint::open(&fixture.packed_root, runtime.clone()).unwrap();
+        let streaming = packed
+            .load_streaming(ResidencyPolicy {
+                device_cache_bytes: 1024,
+                max_background_inflight_bytes: 1024,
+                ..ResidencyPolicy::default()
+            })
+            .unwrap();
+        let input = cpu_input
+            .to_device(runtime.device().tensor_device())
+            .unwrap();
+        let cancellation = CancellationToken::new();
+        let permit = runtime.begin(&cancellation).unwrap();
+        let mut cache = streaming.new_cache();
+        let actual = streaming
+            .forward(&input, &mut cache, &permit, &cancellation)
+            .await
+            .unwrap();
+
+        compare_with_epsilon(&actual.logits, &expected.logits, 1e-4);
+        compare_routes(&actual.layer_routes, &expected.layer_routes, 1e-5);
+        assert_eq!(cache.position(), 3);
+        assert!(cache.resident_bytes().unwrap() > 0);
+        assert!(actual
+            .logits
+            .device()
+            .same_device(runtime.device().tensor_device()));
+    }
+
+    struct TinyPackedFixture {
+        _directory: tempfile::TempDir,
+        source: Qwen36MoeCheckpoint,
+        packed_root: PathBuf,
+        limits: InferenceLimits,
+        report: Qwen36MoeConversionReport,
+    }
+
+    fn tiny_packed_fixture() -> TinyPackedFixture {
         let directory = tempfile::tempdir().unwrap();
         let source_root = directory.path().join("source");
         std::fs::create_dir(&source_root).unwrap();
@@ -169,7 +281,6 @@ mod tests {
         .unwrap();
 
         let source = Qwen36MoeCheckpoint::open(&source_root).unwrap();
-        let resident = source.load_cpu_resident().unwrap();
         let packed_root = directory.path().join("packed");
         let limits = InferenceLimits {
             max_concurrent_requests: 2,
@@ -185,66 +296,42 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(report.dense_files, 64);
-        assert_eq!(report.expert_files, 8);
-        assert_eq!(report.packed_experts, 12);
-        assert!(report.peak_buffered_bytes <= 1024);
-
-        let runtime = EmbeddedRuntime::new(DevicePreference::Cpu, limits).unwrap();
-        let packed = Qwen36MoePackedCheckpoint::open(&packed_root, runtime.clone()).unwrap();
-        assert_eq!(
-            packed.manifest().capabilities,
-            [Qwen36MoePackedManifest::TEXT_GENERATION_CAPABILITY]
-        );
-        assert!(packed.load_tokenizer().is_err());
-        let streaming = packed
-            .load_streaming(ResidencyPolicy {
-                host_cache_bytes: 512,
-                max_background_inflight_bytes: 1024,
-                ..ResidencyPolicy::default()
-            })
-            .unwrap();
-        let input = Tensor::from_slice(&[1_u32, 4, 2], (1, 3), &Device::Cpu).unwrap();
-        let expected = resident.forward(&input, &mut resident.new_cache()).unwrap();
-        let cancellation = CancellationToken::new();
-        let permit = runtime.begin(&cancellation).unwrap();
-        let actual = streaming
-            .forward(&input, &mut streaming.new_cache(), &permit, &cancellation)
-            .await
-            .unwrap();
-        compare(&actual.logits, &expected.logits);
-        assert_eq!(actual.layer_routes, expected.layer_routes);
-        assert_eq!(actual.layer_staging.len(), 4);
-
-        let first = Tensor::from_slice(&[1_u32, 2], (1, 2), &Device::Cpu).unwrap();
-        let second = Tensor::from_slice(&[4_u32], (1, 1), &Device::Cpu).unwrap();
-        let expected_first = resident.forward(&first, &mut resident.new_cache()).unwrap();
-        let expected_second = resident
-            .forward(&second, &mut resident.new_cache())
-            .unwrap();
-        let mut first_cache = streaming.new_cache();
-        let mut second_cache = streaming.new_cache();
-        let mut rows = [
-            Qwen36MoeStreamingBatchRow::new(&first, &mut first_cache),
-            Qwen36MoeStreamingBatchRow::new(&second, &mut second_cache),
-        ];
-        let batched = streaming
-            .forward_batch(&mut rows, &permit, &cancellation)
-            .await
-            .unwrap();
-        compare(&batched.rows[0].logits, &expected_first.logits);
-        compare(&batched.rows[1].logits, &expected_second.logits);
-        assert_eq!(batched.layer_union_routes.len(), 4);
-        assert_eq!(first_cache.position(), 2);
-        assert_eq!(second_cache.position(), 1);
+        TinyPackedFixture {
+            _directory: directory,
+            source,
+            packed_root,
+            limits,
+            report,
+        }
     }
 
     fn compare(actual: &Tensor, expected: &Tensor) {
+        compare_with_epsilon(actual, expected, 2e-5);
+    }
+
+    fn compare_with_epsilon(actual: &Tensor, expected: &Tensor, epsilon: f32) {
         let actual = actual.flatten_all().unwrap().to_vec1::<f32>().unwrap();
         let expected = expected.flatten_all().unwrap().to_vec1::<f32>().unwrap();
         assert_eq!(actual.len(), expected.len());
         for (actual, expected) in actual.iter().zip(expected.iter()) {
-            assert_abs_diff_eq!(*actual, *expected, epsilon = 2e-5);
+            assert_abs_diff_eq!(*actual, *expected, epsilon = epsilon);
+        }
+    }
+
+    fn compare_routes(actual: &[RoutedExpertBatch], expected: &[RoutedExpertBatch], epsilon: f32) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(actual.layer(), expected.layer());
+            assert_eq!(actual.expert_count(), expected.expert_count());
+            assert_eq!(actual.experts(), expected.experts());
+            assert_eq!(actual.selections().len(), expected.selections().len());
+            for (actual, expected) in actual.selections().iter().zip(expected.selections()) {
+                assert_eq!(actual.len(), expected.len());
+                for (actual, expected) in actual.iter().zip(expected) {
+                    assert_eq!(actual.expert, expected.expert);
+                    assert_abs_diff_eq!(actual.weight, expected.weight, epsilon = epsilon);
+                }
+            }
         }
     }
 }

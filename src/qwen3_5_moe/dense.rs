@@ -37,11 +37,6 @@ pub(super) struct Qwen36DenseModel {
 impl Qwen36DenseModel {
     pub(super) fn load(config: Qwen36MoeConfig, builder: VarBuilder<'_>) -> Result<Self> {
         config.validate()?;
-        if !builder.device().is_cpu() {
-            return Err(MoeError::InvalidConfig(
-                "Qwen3.6 text execution currently requires a CPU VarBuilder".to_string(),
-            ));
-        }
         if builder.dtype() != DType::F32 {
             return Err(MoeError::InvalidConfig(format!(
                 "Qwen3.6 text execution requires F32, found {:?}",

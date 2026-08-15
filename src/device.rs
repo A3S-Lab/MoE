@@ -7,14 +7,14 @@ use crate::MoeError;
 
 /// Strict command-line representation of Power's typed device preference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OlmoeDeviceSpec {
+pub enum MoeDeviceSpec {
     Auto,
     Cpu,
     Cuda { ordinal: usize },
     Metal { ordinal: usize },
 }
 
-impl OlmoeDeviceSpec {
+impl MoeDeviceSpec {
     pub fn preference(self) -> DevicePreference {
         match self {
             Self::Auto => DevicePreference::Auto,
@@ -25,7 +25,7 @@ impl OlmoeDeviceSpec {
     }
 }
 
-impl FromStr for OlmoeDeviceSpec {
+impl FromStr for MoeDeviceSpec {
     type Err = MoeError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -55,7 +55,7 @@ impl FromStr for OlmoeDeviceSpec {
     }
 }
 
-impl Display for OlmoeDeviceSpec {
+impl Display for MoeDeviceSpec {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Auto => formatter.write_str("auto"),
@@ -66,13 +66,12 @@ impl Display for OlmoeDeviceSpec {
     }
 }
 
-/// Architecture-neutral name for the service device argument.
-pub type MoeDeviceSpec = OlmoeDeviceSpec;
-
-/// Qwen3-MoE compatibility name for the service device argument.
-pub type Qwen3MoeDeviceSpec = OlmoeDeviceSpec;
-/// Qwen3.6-MoE compatibility name for the service device argument.
-pub type Qwen36MoeDeviceSpec = OlmoeDeviceSpec;
+/// OLMoE compatibility name for the shared device argument.
+pub type OlmoeDeviceSpec = MoeDeviceSpec;
+/// Qwen3-MoE compatibility name for the shared device argument.
+pub type Qwen3MoeDeviceSpec = MoeDeviceSpec;
+/// Qwen3.6-MoE compatibility name for the shared device argument.
+pub type Qwen36MoeDeviceSpec = MoeDeviceSpec;
 
 #[cfg(test)]
 mod tests {
@@ -81,23 +80,20 @@ mod tests {
     #[test]
     fn parses_only_typed_device_specs() {
         assert_eq!(
-            "auto".parse::<OlmoeDeviceSpec>().unwrap(),
-            OlmoeDeviceSpec::Auto
+            "auto".parse::<MoeDeviceSpec>().unwrap(),
+            MoeDeviceSpec::Auto
+        );
+        assert_eq!("cpu".parse::<MoeDeviceSpec>().unwrap(), MoeDeviceSpec::Cpu);
+        assert_eq!(
+            "cuda:2".parse::<MoeDeviceSpec>().unwrap(),
+            MoeDeviceSpec::Cuda { ordinal: 2 }
         );
         assert_eq!(
-            "cpu".parse::<OlmoeDeviceSpec>().unwrap(),
-            OlmoeDeviceSpec::Cpu
-        );
-        assert_eq!(
-            "cuda:2".parse::<OlmoeDeviceSpec>().unwrap(),
-            OlmoeDeviceSpec::Cuda { ordinal: 2 }
-        );
-        assert_eq!(
-            "metal:0".parse::<OlmoeDeviceSpec>().unwrap(),
-            OlmoeDeviceSpec::Metal { ordinal: 0 }
+            "metal:0".parse::<MoeDeviceSpec>().unwrap(),
+            MoeDeviceSpec::Metal { ordinal: 0 }
         );
         for invalid in ["cuda", "cuda:-1", "cpu:0", "gpu:0", "CUDA:0"] {
-            assert!(invalid.parse::<OlmoeDeviceSpec>().is_err(), "{invalid}");
+            assert!(invalid.parse::<MoeDeviceSpec>().is_err(), "{invalid}");
         }
     }
 }

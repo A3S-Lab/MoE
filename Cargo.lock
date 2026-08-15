@@ -45,7 +45,7 @@ dependencies = [
 [[package]]
 name = "a3s-power"
 version = "0.8.0"
-source = "git+https://github.com/A3S-Lab/Power.git?rev=42c6646#42c66460533112cc5cb82931a6beda09fc2361ed"
+source = "git+https://github.com/A3S-Lab/Power.git?rev=245ca1c60639594d1236bdf149f9974301171ccd#245ca1c60639594d1236bdf149f9974301171ccd"
 dependencies = [
  "a3s-acl",
  "a3s-runtime",
@@ -55,10 +55,12 @@ dependencies = [
  "axum",
  "axum-extra",
  "base64 0.22.1",
+ "bytemuck",
  "candle-core",
  "candle-nn",
  "chrono",
  "clap",
+ "cudaforge",
  "dirs",
  "ed25519-dalek",
  "either",
@@ -2176,9 +2178,9 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minijinja"
-version = "2.24.0"
+version = "2.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86886cf6dbf4e614b19c9a1eec9775f021869d7eadde0fc73921a81b90c9b4c9"
+checksum = "cb3d648e68cea56d9858d535ee28f9538404e2dd8cb08ed0bd05dca379477f39"
 dependencies = [
  "memo-map",
  "serde",

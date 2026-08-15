@@ -193,9 +193,6 @@ async fn main() -> Result<()> {
             if args.encrypted_manifest_sha256.is_some() || args.encrypted_key_env.is_some() {
                 bail!("encrypted checkpoint loading is currently supported only for OLMoE");
             }
-            if args.device.preference() != a3s_power::inference::DevicePreference::Cpu {
-                bail!("Qwen3.6-35B-A3B currently requires --device cpu");
-            }
             let backend = Arc::new(Qwen36MoeBackend::new(backend_config)?);
             let manifest = backend
                 .preload(&model_name, &args.checkpoint, template_override)

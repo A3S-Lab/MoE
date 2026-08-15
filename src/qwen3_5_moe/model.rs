@@ -25,6 +25,11 @@ pub struct Qwen36MoeCpuModel {
 
 impl Qwen36MoeCpuModel {
     pub fn load(config: Qwen36MoeConfig, builder: VarBuilder<'_>) -> Result<Self> {
+        if !builder.device().is_cpu() {
+            return Err(MoeError::InvalidConfig(
+                "the resident Qwen3.6 correctness backend requires a CPU VarBuilder".to_string(),
+            ));
+        }
         let dense = Qwen36DenseModel::load(config.clone(), builder.clone())?;
         let mut routed_mlps = Vec::with_capacity(config.num_hidden_layers);
         for layer in 0..config.num_hidden_layers {

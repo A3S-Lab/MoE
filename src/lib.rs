@@ -8,6 +8,7 @@ mod checkpoint;
 #[doc(hidden)]
 pub mod continuous;
 mod decoder;
+mod device;
 mod error;
 mod family;
 mod matrix;
@@ -23,6 +24,7 @@ mod tokenizer;
 mod validation;
 
 pub use decoder::DecoderKvCache;
+pub use device::{MoeDeviceSpec, OlmoeDeviceSpec, Qwen36MoeDeviceSpec, Qwen3MoeDeviceSpec};
 pub use error::{MoeError, Result};
 pub use family::MoeArchitecture;
 pub use matrix::Matrix;

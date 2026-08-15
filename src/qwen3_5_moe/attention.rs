@@ -133,10 +133,11 @@ impl Qwen36MoeAttention {
         let (key, value) = append_cache(cache, key, value, position, batch_size)?;
         let total_length = key.dim(2)?;
         let repetitions = self.num_heads / self.num_key_value_heads;
-        let key = repeat_key_value(&key, repetitions)?;
-        let value = repeat_key_value(&value, repetitions)?;
-        let mut scores =
-            (query.matmul(&key.transpose(2, 3)?)? * (1.0 / (self.head_dim as f64).sqrt()))?;
+        let query = query.contiguous()?;
+        let key = repeat_key_value(&key, repetitions)?.contiguous()?;
+        let value = repeat_key_value(&value, repetitions)?.contiguous()?;
+        let key_transposed = key.transpose(2, 3)?.contiguous()?;
+        let mut scores = (query.matmul(&key_transposed)? * (1.0 / (self.head_dim as f64).sqrt()))?;
         if sequence_length > 1 {
             scores = scores.broadcast_add(&causal_mask(
                 sequence_length,

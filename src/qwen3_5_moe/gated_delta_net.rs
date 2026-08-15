@@ -15,9 +15,9 @@ pub(super) struct Qwen36GatedDeltaNet {
     in_proj_a: Linear,
     out_proj: Linear,
     norm: RmsNorm,
-    conv_weight: Vec<f32>,
-    a_log: Vec<f32>,
-    dt_bias: Vec<f32>,
+    conv_weight: Tensor,
+    decay_scale: Tensor,
+    dt_bias: Tensor,
     hidden_size: usize,
     num_key_heads: usize,
     num_value_heads: usize,
@@ -31,6 +31,7 @@ pub(super) struct Qwen36GatedDeltaNet {
 
 impl Qwen36GatedDeltaNet {
     pub(super) fn load(config: &Qwen36MoeConfig, builder: VarBuilder<'_>) -> Result<Self> {
+        let repetitions = config.linear_num_value_heads / config.linear_num_key_heads;
         let key_dim = config
             .linear_num_key_heads
             .checked_mul(config.linear_key_head_dim)
@@ -50,14 +51,15 @@ impl Qwen36GatedDeltaNet {
                 (conv_dim, 1, config.linear_conv_kernel_dim),
                 "conv1d.weight",
             )?
-            .flatten_all()?
-            .to_vec1::<f32>()?;
-        let a_log = builder
+            .squeeze(1)?;
+        let decay_scale = builder
             .get(config.linear_num_value_heads, "A_log")?
-            .to_vec1::<f32>()?;
+            .exp()?
+            .neg()?
+            .reshape((1, 1, config.linear_num_key_heads, repetitions))?;
         let dt_bias = builder
             .get(config.linear_num_value_heads, "dt_bias")?
-            .to_vec1::<f32>()?;
+            .reshape((1, 1, config.linear_num_key_heads, repetitions))?;
         Ok(Self {
             in_proj_qkv: candle_nn::linear_no_bias(
                 config.hidden_size,
@@ -89,7 +91,7 @@ impl Qwen36GatedDeltaNet {
                 config.rms_norm_eps,
             ),
             conv_weight,
-            a_log,
+            decay_scale,
             dt_bias,
             hidden_size: config.hidden_size,
             num_key_heads: config.linear_num_key_heads,
@@ -106,12 +108,21 @@ impl Qwen36GatedDeltaNet {
     pub(super) fn forward(
         &self,
         hidden_states: &Tensor,
-        conv_state: &mut Option<Vec<f32>>,
-        recurrent_state: &mut Option<Vec<f32>>,
+        conv_state: &mut Option<Tensor>,
+        recurrent_state: &mut Option<Tensor>,
     ) -> Result<Tensor> {
-        if hidden_states.dtype() != DType::F32 || !hidden_states.device().is_cpu() {
+        if hidden_states.dtype() != DType::F32 {
+            return Err(MoeError::InvalidTensor(format!(
+                "Qwen3.6 Gated DeltaNet requires F32 hidden states, found {:?}",
+                hidden_states.dtype()
+            )));
+        }
+        if !hidden_states
+            .device()
+            .same_device(self.conv_weight.device())
+        {
             return Err(MoeError::InvalidTensor(
-                "Qwen3.6 Gated DeltaNet requires F32 CPU hidden states".to_string(),
+                "Qwen3.6 Gated DeltaNet input and weights must use the same device".to_string(),
             ));
         }
         let (batch_size, sequence_length, hidden_size) = hidden_states.dims3()?;
@@ -122,102 +133,84 @@ impl Qwen36GatedDeltaNet {
             )));
         }
 
-        let mixed = self
-            .in_proj_qkv
-            .forward(hidden_states)?
-            .flatten_all()?
-            .to_vec1::<f32>()?;
+        let mixed = self.in_proj_qkv.forward(hidden_states)?;
         let z = self.in_proj_z.forward(hidden_states)?;
-        let beta = self
-            .in_proj_b
-            .forward(hidden_states)?
-            .flatten_all()?
-            .to_vec1::<f32>()?;
-        let decay_input = self
-            .in_proj_a
-            .forward(hidden_states)?
-            .flatten_all()?
-            .to_vec1::<f32>()?;
-        let convolved = self.causal_convolution(&mixed, batch_size, sequence_length, conv_state)?;
-        let mut state = self.take_recurrent_state(batch_size, recurrent_state)?;
-        let mut output = vec![0.0_f32; batch_size * sequence_length * self.value_dim];
         let repetitions = self.num_value_heads / self.num_key_heads;
-        let state_per_head = self.key_head_dim * self.value_head_dim;
-        let mut normalized_query = vec![0.0_f32; self.key_head_dim];
-        let mut normalized_key = vec![0.0_f32; self.key_head_dim];
-        let mut delta = vec![0.0_f32; self.value_head_dim];
-
-        for batch in 0..batch_size {
-            for token in 0..sequence_length {
-                let mixed_base = (batch * sequence_length + token) * self.conv_dim;
-                let control_base = (batch * sequence_length + token) * self.num_value_heads;
-                let output_base = (batch * sequence_length + token) * self.value_dim;
-                for value_head in 0..self.num_value_heads {
-                    let key_head = value_head / repetitions;
-                    let query_base = mixed_base + key_head * self.key_head_dim;
-                    let key_base = mixed_base + self.key_dim + key_head * self.key_head_dim;
-                    l2_normalize(
-                        &convolved[query_base..query_base + self.key_head_dim],
-                        &mut normalized_query,
-                    );
-                    l2_normalize(
-                        &convolved[key_base..key_base + self.key_head_dim],
-                        &mut normalized_key,
-                    );
-                    let value_base =
-                        mixed_base + 2 * self.key_dim + value_head * self.value_head_dim;
-                    let state_base = (batch * self.num_value_heads + value_head) * state_per_head;
-                    let beta = sigmoid(beta[control_base + value_head]);
-                    let g = -self.a_log[value_head].exp()
-                        * softplus(
-                            decay_input[control_base + value_head] + self.dt_bias[value_head],
-                        );
-                    let decay = g.exp();
-                    for state_value in &mut state[state_base..state_base + state_per_head] {
-                        *state_value *= decay;
-                    }
-                    for value_dimension in 0..self.value_head_dim {
-                        let mut memory = 0.0_f32;
-                        for key_dimension in 0..self.key_head_dim {
-                            memory += state[state_base
-                                + key_dimension * self.value_head_dim
-                                + value_dimension]
-                                * normalized_key[key_dimension];
-                        }
-                        delta[value_dimension] =
-                            (convolved[value_base + value_dimension] - memory) * beta;
-                    }
-                    for (key_dimension, key) in normalized_key.iter().copied().enumerate() {
-                        let row = state_base + key_dimension * self.value_head_dim;
-                        for value_dimension in 0..self.value_head_dim {
-                            state[row + value_dimension] += key * delta[value_dimension];
-                        }
-                    }
-                    let scale = 1.0_f32 / (self.key_head_dim as f32).sqrt();
-                    for value_dimension in 0..self.value_head_dim {
-                        let mut attended = 0.0_f32;
-                        for key_dimension in 0..self.key_head_dim {
-                            attended += state[state_base
-                                + key_dimension * self.value_head_dim
-                                + value_dimension]
-                                * normalized_query[key_dimension];
-                        }
-                        output[output_base + value_head * self.value_head_dim + value_dimension] =
-                            attended * scale;
-                    }
-                }
-            }
+        let beta = candle_nn::ops::sigmoid(&self.in_proj_b.forward(hidden_states)?.reshape((
+            batch_size,
+            sequence_length,
+            self.num_key_heads,
+            repetitions,
+        ))?)?;
+        let decay_input = self.in_proj_a.forward(hidden_states)?.reshape((
+            batch_size,
+            sequence_length,
+            self.num_key_heads,
+            repetitions,
+        ))?;
+        let decay = tensor_softplus(&decay_input.broadcast_add(&self.dt_bias)?)?
+            .broadcast_mul(&self.decay_scale)?
+            .exp()?;
+        let convolved = self.causal_convolution(&mixed, conv_state)?;
+        let queries = l2_normalize_tensor(&convolved.narrow(2, 0, self.key_dim)?.reshape((
+            batch_size,
+            sequence_length,
+            self.num_key_heads,
+            self.key_head_dim,
+        ))?)?;
+        let keys =
+            l2_normalize_tensor(&convolved.narrow(2, self.key_dim, self.key_dim)?.reshape((
+                batch_size,
+                sequence_length,
+                self.num_key_heads,
+                self.key_head_dim,
+            ))?)?;
+        let values = convolved
+            .narrow(2, 2 * self.key_dim, self.value_dim)?
+            .reshape((
+                batch_size,
+                sequence_length,
+                self.num_key_heads,
+                repetitions,
+                self.value_head_dim,
+            ))?;
+        let mut state =
+            self.take_recurrent_state(batch_size, repetitions, hidden_states, recurrent_state)?;
+        let mut outputs = Vec::with_capacity(sequence_length);
+        let scale = 1.0_f64 / (self.key_head_dim as f64).sqrt();
+        for token in 0..sequence_length {
+            let query = queries
+                .narrow(1, token, 1)?
+                .squeeze(1)?
+                .unsqueeze(2)?
+                .unsqueeze(4)?;
+            let key = keys
+                .narrow(1, token, 1)?
+                .squeeze(1)?
+                .unsqueeze(2)?
+                .unsqueeze(4)?;
+            let value = values.narrow(1, token, 1)?.squeeze(1)?;
+            let token_decay = decay
+                .narrow(1, token, 1)?
+                .squeeze(1)?
+                .unsqueeze(3)?
+                .unsqueeze(4)?;
+            state = state.broadcast_mul(&token_decay)?;
+            let memory = state.broadcast_mul(&key)?.sum(3)?;
+            let token_beta = beta.narrow(1, token, 1)?.squeeze(1)?.unsqueeze(3)?;
+            let delta = value.sub(&memory)?.broadcast_mul(&token_beta)?;
+            state = state.add(&key.broadcast_mul(&delta.unsqueeze(3)?)?)?;
+            outputs.push(
+                (state.broadcast_mul(&query)?.sum(3)? * scale)?
+                    .reshape((batch_size, self.value_dim))?,
+            );
         }
         *recurrent_state = Some(state);
 
-        let output = Tensor::from_vec(
-            output,
-            (
-                batch_size * sequence_length * self.num_value_heads,
-                self.value_head_dim,
-            ),
-            hidden_states.device(),
-        )?;
+        let output = Tensor::stack(&outputs, 1)?.reshape((
+            batch_size * sequence_length * self.num_value_heads,
+            self.value_head_dim,
+        ))?;
         let gated = self
             .norm
             .forward(&output)?
@@ -231,111 +224,120 @@ impl Qwen36GatedDeltaNet {
 
     fn causal_convolution(
         &self,
-        mixed: &[f32],
-        batch_size: usize,
-        sequence_length: usize,
-        conv_state: &mut Option<Vec<f32>>,
-    ) -> Result<Vec<f32>> {
-        let history_length = self.conv_kernel_size - 1;
-        let expected_history = batch_size
-            .checked_mul(self.conv_dim)
-            .and_then(|value| value.checked_mul(history_length))
-            .ok_or_else(|| {
-                MoeError::InvalidTensor("convolution state size overflowed".to_string())
-            })?;
-        let history = match conv_state.take() {
-            Some(history) if history.len() == expected_history => history,
-            Some(history) => {
-                return Err(MoeError::InvalidTensor(format!(
-                    "convolution state contains {} values, expected {expected_history}",
-                    history.len()
-                )))
-            }
-            None => vec![0.0; expected_history],
-        };
-        let expected_mixed = batch_size
-            .checked_mul(sequence_length)
-            .and_then(|value| value.checked_mul(self.conv_dim))
-            .ok_or_else(|| {
-                MoeError::InvalidTensor("convolution input size overflowed".to_string())
-            })?;
-        if mixed.len() != expected_mixed {
+        mixed: &Tensor,
+        conv_state: &mut Option<Tensor>,
+    ) -> Result<Tensor> {
+        let (batch_size, sequence_length, conv_dim) = mixed.dims3()?;
+        if conv_dim != self.conv_dim {
             return Err(MoeError::InvalidTensor(format!(
-                "convolution input contains {} values, expected {expected_mixed}",
-                mixed.len()
+                "linear convolution input width must be {}, found {conv_dim}",
+                self.conv_dim
             )));
         }
-        let mut output = vec![0.0_f32; mixed.len()];
-        for batch in 0..batch_size {
-            for token in 0..sequence_length {
-                for channel in 0..self.conv_dim {
-                    let mut value = 0.0_f32;
-                    for tap in 0..self.conv_kernel_size {
-                        let source_position =
-                            token as isize + tap as isize - history_length as isize;
-                        let source = if source_position < 0 {
-                            let history_position =
-                                (history_length as isize + source_position) as usize;
-                            history[(batch * self.conv_dim + channel) * history_length
-                                + history_position]
-                        } else {
-                            mixed[(batch * sequence_length + source_position as usize)
-                                * self.conv_dim
-                                + channel]
-                        };
-                        value += source * self.conv_weight[channel * self.conv_kernel_size + tap];
-                    }
-                    output[(batch * sequence_length + token) * self.conv_dim + channel] =
-                        silu(value);
-                }
+        let history_length = self.conv_kernel_size - 1;
+        let history = match conv_state.take() {
+            Some(history)
+                if history.dtype() == DType::F32
+                    && history.device().same_device(mixed.device())
+                    && history.dims() == [batch_size, self.conv_dim, history_length] =>
+            {
+                history
             }
-        }
-        let mut next_history = vec![0.0_f32; expected_history];
-        for batch in 0..batch_size {
-            for channel in 0..self.conv_dim {
-                for history_position in 0..history_length {
-                    let source_position = sequence_length as isize - history_length as isize
-                        + history_position as isize;
-                    next_history
-                        [(batch * self.conv_dim + channel) * history_length + history_position] =
-                        if source_position < 0 {
-                            history[(batch * self.conv_dim + channel) * history_length
-                                + (history_length as isize + source_position) as usize]
-                        } else {
-                            mixed[(batch * sequence_length + source_position as usize)
-                                * self.conv_dim
-                                + channel]
-                        };
-                }
+            Some(history) => {
+                return Err(MoeError::InvalidTensor(format!(
+                    "convolution state must be F32 [{batch_size}, {}, {history_length}] on the execution device, found {:?} {:?}",
+                    self.conv_dim,
+                    history.dtype(),
+                    history.dims()
+                )))
             }
+            None => Tensor::zeros(
+                (batch_size, self.conv_dim, history_length),
+                DType::F32,
+                mixed.device(),
+            )?,
+        };
+        let channels = mixed.transpose(1, 2)?.contiguous()?;
+        let window = if history_length == 0 {
+            channels
+        } else {
+            Tensor::cat(&[&history, &channels], 2)?
+        };
+        let mut output = Tensor::zeros(
+            (batch_size, self.conv_dim, sequence_length),
+            DType::F32,
+            mixed.device(),
+        )?;
+        for tap in 0..self.conv_kernel_size {
+            let source = window.narrow(2, tap, sequence_length)?;
+            let weight = self
+                .conv_weight
+                .narrow(1, tap, 1)?
+                .reshape((1, self.conv_dim, 1))?;
+            output = output.add(&source.broadcast_mul(&weight)?)?;
         }
-        *conv_state = Some(next_history);
-        Ok(output)
+        *conv_state = if history_length == 0 {
+            None
+        } else {
+            Some(
+                window
+                    .narrow(2, sequence_length, history_length)?
+                    .contiguous()?,
+            )
+        };
+        Ok(candle_nn::ops::silu(&output)?
+            .transpose(1, 2)?
+            .contiguous()?)
     }
 
     fn take_recurrent_state(
         &self,
         batch_size: usize,
-        recurrent_state: &mut Option<Vec<f32>>,
-    ) -> Result<Vec<f32>> {
-        let expected = batch_size
-            .checked_mul(self.num_value_heads)
-            .and_then(|value| value.checked_mul(self.key_head_dim))
-            .and_then(|value| value.checked_mul(self.value_head_dim))
-            .ok_or_else(|| {
-                MoeError::InvalidTensor("recurrent state size overflowed".to_string())
-            })?;
+        repetitions: usize,
+        hidden_states: &Tensor,
+        recurrent_state: &mut Option<Tensor>,
+    ) -> Result<Tensor> {
+        let expected = [
+            batch_size,
+            self.num_key_heads,
+            repetitions,
+            self.key_head_dim,
+            self.value_head_dim,
+        ];
         match recurrent_state.take() {
-            Some(state) if state.len() == expected => Ok(state),
+            Some(state)
+                if state.dtype() == DType::F32
+                    && state.device().same_device(hidden_states.device())
+                    && state.dims() == expected =>
+            {
+                Ok(state)
+            }
             Some(state) => Err(MoeError::InvalidTensor(format!(
-                "recurrent state contains {} values, expected {expected}",
-                state.len()
+                "recurrent state must be F32 {expected:?} on the execution device, found {:?} {:?}",
+                state.dtype(),
+                state.dims()
             ))),
-            None => Ok(vec![0.0; expected]),
+            None => Ok(Tensor::zeros(
+                &expected,
+                DType::F32,
+                hidden_states.device(),
+            )?),
         }
     }
 }
 
+fn l2_normalize_tensor(input: &Tensor) -> Result<Tensor> {
+    let norm = (input.sqr()?.sum_keepdim(3)? + L2_NORM_EPSILON as f64)?.sqrt()?;
+    Ok(input.broadcast_div(&norm)?)
+}
+
+fn tensor_softplus(input: &Tensor) -> Result<Tensor> {
+    let positive = input.maximum(&input.zeros_like()?)?;
+    let tail = (input.abs()?.neg()?.exp()? + 1.0)?.log()?;
+    Ok(positive.add(&tail)?)
+}
+
+#[cfg(test)]
 fn l2_normalize(input: &[f32], output: &mut [f32]) {
     let inverse_norm = (input.iter().map(|value| value * value).sum::<f32>() + L2_NORM_EPSILON)
         .sqrt()
@@ -345,6 +347,7 @@ fn l2_normalize(input: &[f32], output: &mut [f32]) {
     }
 }
 
+#[cfg(test)]
 fn sigmoid(value: f32) -> f32 {
     if value >= 0.0 {
         1.0 / (1.0 + (-value).exp())
@@ -354,6 +357,7 @@ fn sigmoid(value: f32) -> f32 {
     }
 }
 
+#[cfg(test)]
 fn softplus(value: f32) -> f32 {
     if value > 20.0 {
         value
@@ -362,10 +366,6 @@ fn softplus(value: f32) -> f32 {
     } else {
         value.exp().ln_1p()
     }
-}
-
-fn silu(value: f32) -> f32 {
-    value * sigmoid(value)
 }
 
 #[cfg(test)]

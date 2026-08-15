@@ -1,9 +1,10 @@
 use std::path::Path;
 
 use a3s_power::inference::{
-    DevicePreference, EmbeddedRuntime, InferenceLimits, ResidencyPolicy, TelemetryMode,
+    DevicePreference, EmbeddedRuntime, InferenceLimits, ResidencyPolicy, RuntimeDeviceKind,
+    TelemetryMode,
 };
-use candle_core::{Device, Tensor};
+use candle_core::Tensor;
 use tokio_util::sync::CancellationToken;
 
 use crate::{MoeArchitecture, MoeError, Result};
@@ -30,6 +31,7 @@ const DEFAULT_HOST_CACHE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// Resource and numerical policy for public Qwen3.6 validation.
 #[derive(Debug, Clone)]
 pub struct Qwen36MoeValidationOptions {
+    pub device: DevicePreference,
     pub tolerances: Qwen36MoeValidationTolerances,
     pub inference_limits: InferenceLimits,
     pub residency_policy: ResidencyPolicy,
@@ -38,6 +40,7 @@ pub struct Qwen36MoeValidationOptions {
 impl Default for Qwen36MoeValidationOptions {
     fn default() -> Self {
         Self {
+            device: DevicePreference::Cpu,
             tolerances: Qwen36MoeValidationTolerances::default(),
             inference_limits: MoeArchitecture::Qwen35Moe.inference_limits(),
             residency_policy: ResidencyPolicy {
@@ -58,6 +61,12 @@ pub async fn validate_public_checkpoint(
     options: Qwen36MoeValidationOptions,
 ) -> Result<Qwen36MoeValidationReport> {
     validate_options(&options)?;
+    let Qwen36MoeValidationOptions {
+        device,
+        tolerances,
+        inference_limits,
+        mut residency_policy,
+    } = options;
     let oracle = read_oracle(oracle_path.as_ref())?;
     validate_provenance(&oracle)?;
 
@@ -68,7 +77,15 @@ pub async fn validate_public_checkpoint(
     validate_token_ids(&encoded, &oracle)?;
     validate_oracle_shape(&oracle, source.config())?;
 
-    let runtime = EmbeddedRuntime::new(DevicePreference::Cpu, options.inference_limits)?;
+    let runtime = EmbeddedRuntime::new(device, inference_limits)?;
+    let resolved_device = runtime.device().identity();
+    let automatic_cpu_fallback =
+        device == DevicePreference::Auto && resolved_device.kind == RuntimeDeviceKind::Cpu;
+    if resolved_device.kind == RuntimeDeviceKind::Cpu {
+        residency_policy.device_cache_bytes = 0;
+    }
+    let host_cache_bytes = residency_policy.host_cache_bytes;
+    let device_cache_bytes = residency_policy.device_cache_bytes;
     let packed = Qwen36MoePackedCheckpoint::open(packed_root, runtime.clone())?;
     if packed.manifest().source_weights_sha256 != source_weights_sha256 {
         return Err(MoeError::InvalidConfig(format!(
@@ -91,8 +108,12 @@ pub async fn validate_public_checkpoint(
     }
 
     let packed_weights_sha256 = packed.manifest().weights_sha256();
-    let model = packed.load_streaming(options.residency_policy)?;
-    let input = Tensor::from_vec(encoded.clone(), (1, encoded.len()), &Device::Cpu)?;
+    let model = packed.load_streaming(residency_policy)?;
+    let input = Tensor::from_vec(
+        encoded.clone(),
+        (1, encoded.len()),
+        runtime.device().tensor_device(),
+    )?;
     let cancellation = CancellationToken::new();
     let permit = runtime.begin(&cancellation)?;
     let output = model
@@ -103,7 +124,7 @@ pub async fn validate_public_checkpoint(
         MoeError::InvalidTensor("streaming decoder returned no batch rows".to_string())
     })?;
 
-    let mut logits = Qwen36MoeNumericComparison::new(options.tolerances.logits_abs);
+    let mut logits = Qwen36MoeNumericComparison::new(tolerances.logits_abs);
     let mut argmax_token_mismatches = 0_u64;
     for (actual, expected) in actual_logits.iter().zip(&oracle.output.logits) {
         for (&actual, &expected) in actual.iter().zip(expected) {
@@ -114,8 +135,8 @@ pub async fn validate_public_checkpoint(
         }
     }
 
-    let mut router_logits = Qwen36MoeNumericComparison::new(options.tolerances.router_logits_abs);
-    let mut route_weights = Qwen36MoeNumericComparison::new(options.tolerances.route_weights_abs);
+    let mut router_logits = Qwen36MoeNumericComparison::new(tolerances.router_logits_abs);
+    let mut route_weights = Qwen36MoeNumericComparison::new(tolerances.route_weights_abs);
     let mut route_expert_mismatches = 0_u64;
     let mut route_order_mismatches = 0_u64;
     let mut routes_checked = 0_u64;
@@ -169,6 +190,11 @@ pub async fn validate_public_checkpoint(
         schema: QWEN36_MOE_VALIDATION_SCHEMA,
         moe_revision: env!("A3S_MOE_REVISION"),
         power_revision: env!("A3S_POWER_REVISION"),
+        requested_device: device,
+        resolved_device,
+        automatic_cpu_fallback,
+        host_cache_bytes,
+        device_cache_bytes,
         model_id: oracle.model.id,
         model_revision: oracle.model.revision,
         source_weights_sha256,
@@ -197,9 +223,9 @@ pub async fn validate_public_checkpoint(
 fn validate_options(options: &Qwen36MoeValidationOptions) -> Result<()> {
     options.inference_limits.validate()?;
     options.residency_policy.validate()?;
-    if options.residency_policy.device_cache_bytes != 0 {
+    if options.device == DevicePreference::Cpu && options.residency_policy.device_cache_bytes != 0 {
         return Err(MoeError::InvalidConfig(
-            "CPU public validation cannot reserve a device cache".to_string(),
+            "an explicit CPU validation device cannot reserve an accelerator cache".to_string(),
         ));
     }
     for (name, value) in [
