@@ -1,157 +1,114 @@
 # A3S MoE
 
-<p>
+<p align="center">
   <strong>Language / 语言:</strong>
   <a href="README.md">English</a> ·
   <a href="README.zh-CN.md">中文</a>
 </p>
 
+`a3s-moe` 为 [A3S Power](https://github.com/A3S-Lab/Power) 提供模型自有的
+Mixture-of-Experts 推理。Power 仍负责模型无关的调度、权重驻留、
+完整性、设备与服务组合。本 crate 拥有架构特定的张量名称、布局、
+路由方程、内核、KV cache 语义、分词与生成。
 
-`a3s-moe` 提供模型拥有的专家混合推理
-[A3S Power](https://github.com/A3S-Lab/Power)。权力仍然负责
-模型中立的调度、权重驻留、完整性、设备和服务
-组成。这个箱子拥有特定于架构的张量名称、布局、
-路由方程、内核、KV 缓存语义、标记化和生成。
-
-支持的架构是
-[OLMoE-1B-7B](https://huggingface.co/allenai/OLMoE-1B-7B-0924),
+支持的架构包括
+[OLMoE-1B-7B](https://huggingface.co/allenai/OLMoE-1B-7B-0924)、
 [Qwen3-30B-A3B-Base](https://huggingface.co/Qwen/Qwen3-30B-A3B-Base)，以及
-文本生成路径
-[Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)。 OLMoE 有 64
-每层专家，每个代币选择 8 个专家，总参数 7B 个，以及
-大约 1B 个活动参数。 Qwen3-MoE与Qwen3.6独立运行
-模型边界而不改变 Power 的模型中立驻留核心。
+[Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B) 的文本生成路径。
+OLMoE 每层 64 个专家、每 token 选 8 个，总参数约 7B，活跃参数约 1B。
+Qwen3-MoE 与 Qwen3.6 在独立模型边界上运行，不改变 Power 的模型无关驻留核心。
 
-## 目前状态
+## 当前状态
 
-M0数值合约，常驻M1 CPU引擎，有界M2专家流，
-M3连续批处理路径、M4服务路径、M6加密权重基础、
-M7 Qwen3-MoE路径、M8 Qwen3.6文本路径已实现并测试：
+M0 数值契约、驻留型 M1 CPU 引擎、有界 M2 专家流式传输、
+M3 连续批处理路径、M4 服务路径、M6 加密权重基础、
+M7 Qwen3-MoE 路径以及 M8 Qwen3.6 文本路径均已实现并经过测试：
 
-- Hugging Face 兼容 OLMoE 配置解析和严格的几何形状
-  验证。
-- 带有 OLMoE 默认非标准化选择的 Full-softmax top-k 路由
-  概率。
-- 精确融合门/上排序、SiLU 激活、下投影、路线
-  加权和专家减少。
-- 一个固定的微型预言机，涵盖路由器逻辑、选定的专家、路由权重、
-  和最终的隐藏状态。
-- 将精确模型路线转换为 Power 的`RoutedExpertBatch`，无需
-  替换、重新排序或重新规范化。
-- 完整嵌入、RMSNorm、Q/K 归一化、分半 RoPE、分组
-  查询因果注意力、事务性 KV 缓存、剩余解码器层、
-  最终标准，以及LM头。
-- 在任何张量字节之前安全验证已发布的 Hugging Face 索引
-  已加载，加上故意完全驻留的 F32 正确性加载程序。
-- GPT-NeoX 分词器加载、词汇绑定编码/解码和贪婪
-  预填充/解码生成。
-- 完全预填充与增量解码奇偶校验和固定完整解码器
-  oracle 涵盖 logits 和每一层的路线。
-- 版本化无损 F32/BF16 打包专家格式，具有严格的标头，
-  尺寸、长度、有限值和数据类型验证。
-- 发布打包检查点的确定性有界缓冲区转换器
-  原子地记录源、密集和专家集合摘要。
-- 一个完整的异步解码器，保持密集权重驻留，获得
-  来自 Power 的精确路由专家联盟，计算就绪专家，而其他
-  记录负载，并恢复规范的归约顺序。
-- 每代请求一个电力准入许可证，交易取消，
-  测量的缓存边界以及预填充和流式驻留奇偶校验
-  增量贪婪解码。
-- 具有独立的每会话注意力/KV 状态的参差不齐的连续批次，
-  一条路线 - 每层联合专家分段操作，每行规范
-  输出匹配孤立的推理。
-- 一个基于 Power 执行生命周期的公平贪婪调度程序，包括
-  有界入场、直接取消令牌收获、时隙压缩、
-  精确的 KV 状态字节计算，以及仅摘要的步骤/生命周期证据。
-- 确定性每个请求采样，包括温度、top-p、top-k、min-p、
-  不削弱批量路由的重复、频率和存在惩罚
-  联合语义。
-- 架构感知的 Power 后端、流程本地模型清单、有界
-  服务队列、稳定增量UTF-8解码、停止序列缓冲、
-  以及当 HTTP 流被放弃时取消。
-- 用于 OpenAI 聊天和完成端点的独立 Power-compose 服务器，
-  加上记录应用程序冷代和热代的 JSON 基准，
-  TTFT、专家字节读取、缓存状态、峰值 RSS 和独立的常驻 CPU
-  基线。
-- 独立认证、可搜索的 AES-256-GCM 密集且专家
-集合，通过固定检查点与纯文本元数据绑定在一起
-  通过相同的 Power 驻留层次结构来体现和使用。
-- `a3s-moe-encrypt` CLI 和类型化加密服务源，可防止密钥泄露
-  参数、日志、模型清单和解密的中间文件。
-- 完全驻留的 Qwen3-MoE F32 CPU 正确性后端，具有独特的功能
-  注意力头维度、每头 Q/K 归一化、GQA、RoPE、
-  稀疏/密集层调度、标准化 top-k 策略、官方每位专家
-  张量或融合导出器张量、事务性 KV 缓存和贪婪
-  解码。
-- 一个无依赖性的完整 Qwen3-MoE 解码器预言机，涵盖 logits、路由器
-  logits、精确路径、密集到稀疏层转换、预填充/解码
-  奇偶校验，以及在共享 Power 路由边界上滑动注意力。
-- 对官方的严格 Qwen3-MoE Hugging Face 分片索引验证
-  18,867 张量分割专家布局或 531 张量融合导出器布局，
-  常驻检查点加载和共享词汇限制
-  分词器/流解码器。
-- 有界 Qwen3-MoE 转换，读取官方门/上/下矩阵一
-  一次专家，通过验证的功率张量读取融合的 3D 导出器
-  子范围，以块的形式传输超大的密集张量，并发布一个
-  每个稀疏层专家的原子打包记录。
-- 共享居民关注的Qwen3-MoE流解码器，密集的MLP，
-  标准化和委托时的事务性 KV 缓存实现
-  所有专家都隶属于一个权力层级。
-- 保留特定于架构的共享连续调度适配器
-  路由联合输出类型，同时重用电源准入、生命周期、
-  OLMoE 和 Qwen3-MoE 的取消、采样和 KV 计算。
-- 具有自动模型的 Qwen3-MoE Power 后端和服务器组成路径
-  家庭检测、并发请求批处理、OpenAI 完成/聊天
-  流，以及与 OLMoE 相同的失败关闭请求策略。
-- 固定的公开 Qwen3-MoE 验收合同和独立的 Transformers
-  F32-对固定 BF16 权重的操作预言机，加上
-  架构感知 Rust 验证器和性能证据工具。的
-  检查公共 30B-A3B 报告涵盖数字奇偶性、两个并发 HTTP
-  请求、有限 CPU 推理和原始性能遥测。
-- 固定的 Qwen3.6-35B-A3B 合约，用于精确的 26 分片 BF16 检查点，
-  包括其外部多模态索引、693 个文本张量、分词器、修订版、
-  字节长度和文件 SHA-256 值。 Vision 和 MTP 命名空间是
-  经过身份验证的源输入，但故意从打包中排除
-  检查点的`text-generation`能力。
-- 精确的 Qwen3.6 文本方程：三个门控 DeltaNet 层，后跟一层
-  每四层组的全注意力层，偏移 RMSNorm，每头 Q/K
-标准化、部分 RoPE、注意力输出门、事务混合
-  循环/卷积/KV 缓存，以及贪婪增量生成。
-- 所有 40 个 Qwen3.6 层均经过 256 位专家的标准化 Top-8 选择
-  并将它们与门控共享专家结合起来。融合专家数组是
-  通过公共有界子范围打包程序进行转换并由唯一的服务
-  权力权重等级。
-- Qwen3.6 参差不齐的路线联合批处理，类型化后端组合，自动
-  `qwen3_5_moe` 检测、并发 OpenAI 完成、SSE、基准测试
-  证据，以及受来源约束的公共 F32 操作验证器。
-- 设备原生 Qwen3.6 密集、门控 DeltaNet、注意力、共享专家和
-  Power-resolved 加速器上的路由专家执行，具有明确的
-  无后备 CUDA 公共检查点奇偶校验和性能报告。
+- 兼容 Hugging Face 的 OLMoE 配置解析与严格几何校验。
+- 全 softmax top-k 路由，采用 OLMoE 默认的未归一化选中概率。
+- 精确的融合 gate/up 顺序、SiLU 激活、down 投影、路由加权与专家归约。
+- 覆盖 router logits、选中专家、路由权重与最终 hidden states 的固定 tiny oracle。
+- 将精确模型路由转换为 Power 的 `RoutedExpertBatch`，无替换、重排或重新归一化。
+- 完整嵌入、RMSNorm、Q/K 归一化、半分割 RoPE、分组查询因果注意力、
+  事务性 KV cache、残差解码层、最终 norm 与 LM head。
+- 在加载任何张量字节前对已发布 Hugging Face 索引做安全校验，以及刻意全驻留的 F32 正确性加载器。
+- GPT-NeoX 分词器加载、受词表约束的编码/解码，以及贪婪 prefill/decode 生成。
+- 全量 prefill 与增量 decode 的一致性，以及覆盖 logits 与每层路由的固定完整解码器 oracle。
+- 带版本、无损的 F32/BF16 打包专家格式，含严格的头、维度、长度、有限值与 dtype 校验。
+- 确定性有界缓冲转换器：原子发布打包检查点，并记录源、稠密与专家集合摘要。
+- 完整异步解码器：稠密权重保持驻留，从 Power 获取精确路由专家并集，
+  在其他记录加载时计算就绪专家，并恢复规范归约顺序。
+- 每个生成请求一个 Power 准入许可、事务性取消、可度量的 cache 边界，
+  以及 prefill 与增量贪婪 decode 的驻留对比流式一致性。
+- 带独立每会话注意力/KV 状态的不规则连续批、每层一次路由并集专家暂存，
+  以及与隔离推理匹配的规范按行输出。
+- 基于 Power 执行生命周期的公平贪婪调度器，含有界准入、直接取消令牌回收、
+  slot 压缩、精确 KV 状态字节记账，以及仅摘要的 step/生命周期证据。
+- 确定性每请求采样：temperature、top-p、top-k、min-p、重复、频率与存在惩罚，
+  且不削弱批处理路由并集语义。
+- 架构感知的 Power 后端、进程本地模型清单、有界服务队列、稳定增量 UTF-8 解码、
+  stop 序列缓冲，以及 HTTP 流被放弃时的取消。
+- 独立的 Power 组合服务器，提供 OpenAI chat 与 completion 端点，
+  以及记录应用冷/热生成、TTFT、专家读取字节、cache 状态、峰值 RSS
+  与隔离驻留 CPU 基线的 JSON 基准。
+- 独立认证、可寻址的 AES-256-GCM 稠密与专家集合，通过固定检查点清单
+  与明文元数据绑定，并由同一 Power 驻留层级消费。
+- `a3s-moe-encrypt` CLI 与类型化加密服务源，使密钥不出现在参数、日志、
+  模型清单与解密中间文件中。
+- 全驻留 Qwen3-MoE F32 CPU 正确性后端，含其独特的注意力头维度、
+  每头 Q/K 归一化、GQA、RoPE、稀疏/稠密层调度、归一化 top-k 策略、
+  官方每专家张量或融合导出张量、事务性 KV cache 与贪婪解码。
+- 无依赖的完整 Qwen3-MoE 解码器 oracle，覆盖 logits、router logits、
+  精确路由、稠密到稀疏层转换、prefill/decode 一致性，以及跨共享 Power 路由边界的滑动注意力。
+- 严格的 Qwen3-MoE Hugging Face 分片索引校验：官方 18,867 张量拆分专家布局
+  或 531 张量融合导出布局、驻留检查点加载，以及共享的词表约束分词器/流解码器。
+- 有界 Qwen3-MoE 转换：逐专家读取官方 gate/up/down 矩阵，
+  通过已验证的 Power 张量子范围读取融合三维导出，分块流式处理过大稠密张量，
+  并为每个稀疏层专家原子发布一条打包记录。
+- Qwen3-MoE 流式解码器：共享驻留注意力、稠密 MLP、归一化与事务性 KV cache 实现，
+  同时将全部专家驻留委托给单一 Power 层级。
+- 共享连续调度适配器：保留架构特定的路由并集输出类型，
+  同时为 OLMoE 与 Qwen3-MoE 复用 Power 的准入、生命周期、取消、采样与 KV 记账。
+- Qwen3-MoE Power 后端与服务器组合路径：自动模型族检测、并发请求批处理、
+  OpenAI completion/chat 流式传输，以及与 OLMoE 相同的失败关闭请求策略。
+- 固定的公开 Qwen3-MoE 验收契约，以及基于固定 BF16 权重的独立 Transformers
+  F32 运算 oracle，外加架构感知的 Rust 校验器与性能证据工具。
+  已校验的公开 30B-A3B 报告覆盖数值一致性、两个并发 HTTP 请求、
+  有界 CPU 推理与原始性能遥测。
+- 固定的 Qwen3.6-35B-A3B 契约，针对精确的 26 分片 BF16 检查点，
+  含外层多模态索引、693 个文本张量、分词器、修订、字节长度与文件 SHA-256。
+  Vision 与 MTP 命名空间为经认证的源输入，但刻意排除在打包检查点的
+  `text-generation` 能力之外。
+- 精确的 Qwen3.6 文本方程：每四层组中三个 Gated DeltaNet 层后跟一个全注意力层、
+  偏移 RMSNorm、每头 Q/K 归一化、部分 RoPE、注意力输出门控、
+  事务性混合循环/卷积/KV cache，以及贪婪增量生成。
+- 全部 40 个 Qwen3.6 层在 256 个专家上路由归一化 Top-8 选择，
+  并与门控共享专家组合。融合专家数组经公共有界子范围打包器转换，
+  并由唯一的 Power 权重层级提供服务。
+- Qwen3.6 不规则路由并集批处理、类型化后端组合、自动 `qwen3_5_moe` 检测、
+  并发 OpenAI completion、SSE、基准证据，以及溯源绑定的公开 F32 运算校验器。
+- 在 Power 解析的加速器上，设备原生执行 Qwen3.6 稠密、Gated DeltaNet、注意力、
+  共享专家与路由专家，并附带显式无回退的 CUDA 公开检查点一致性与性能报告。
 
-Qwen3.6 实现当前仅公开文本生成。它不
-宣传视觉、视频或 MTP 推理。 HTTP 传输、OpenAI 响应
-框架、身份验证、速率限制、指标和关闭生命周期仍然存在
-归权力所有。确切的固定检查点通过了独立预言机奇偶校验
-在 `cuda:0` 上，没有 CPU 回退。在检查的 20 逻辑核心 Windows 主机上
-配备 RTX 4090、8 GiB Power 设备缓存、无主机专家缓存和 16
-生成的令牌，三个温暖样本平均`0.263611 tokens/s`端到端和
-`3.943 s` TTFT。他们得出的后第一个令牌解码率平均值
-`0.264298 tokens/s`。这是当前无损 F32 执行基线，而不是
-量化或 DSpark 加速的结果。已检查的
-[validation](evidence/qwen3.6-35b-a3b-public-validation.json),
-[CUDA performance](evidence/qwen3.6-35b-a3b-public-cuda-windows.json),
-[CPU performance](evidence/qwen3.6-35b-a3b-public-cpu-windows.json)，以及
-[two-request HTTP](evidence/qwen3.6-35b-a3b-public-http-windows.json)神器
-保留原始值和精确修订。公共检查点金属平价
-仍然悬而未决。
+当前 Qwen3.6 实现仅暴露文本生成。它不宣称 vision、video 或 MTP 推理。
+HTTP 传输、OpenAI 响应成帧、认证、限流、指标与关闭生命周期仍由 Power 拥有。
+精确固定检查点在 `cuda:0` 上通过独立 oracle 一致性验证，无 CPU 回退。
+在已校验的 20 逻辑核 Windows 主机、RTX 4090、8 GiB Power 设备 cache、
+无主机专家 cache、生成 16 个 token 的条件下，三次热样本平均端到端
+`0.263611 tokens/s`、TTFT `3.943 s`。其派生的首 token 后 decode 速率平均
+`0.264298 tokens/s`。这是当前无损 F32 执行基线，而非量化或 DSpark 加速结果。
+已校验的
+[验证](evidence/qwen3.6-35b-a3b-public-validation.json)、
+[CUDA 性能](evidence/qwen3.6-35b-a3b-public-cuda-windows.json)、
+[CPU 性能](evidence/qwen3.6-35b-a3b-public-cpu-windows.json) 与
+[双请求 HTTP](evidence/qwen3.6-35b-a3b-public-http-windows.json) 产物
+保留原始数值与精确修订。公开检查点的 Metal 一致性仍待完成。
 
-完整的固定 13.8 GB OLMoE 公共
-检查点已通过 Transformers-to-Rust 数值验证，有界
-转换、电力流发电、居民代币平价比较，以及
-真正的 HTTP 完成/SSE 冒烟测试。已发布的 OLMoE 检查点是基础
-模型并且没有声明聊天模板，因此服务器使用显式
-通用转录本，除非为兼容的版本提供了`--chat-template`
-微调。检查过的原始证据属于[`evidence/`](evidence/)。
+完整固定的 13.8 GB OLMoE 公开检查点已通过 Transformers 到 Rust 的数值验证、
+有界转换、Power 流式生成、驻留 token 一致性比较，以及真实 HTTP
+completion/SSE 冒烟测试。已发布的 OLMoE 检查点是基座模型，不声明 chat template，
+因此服务器使用显式通用 transcript，除非为兼容微调提供 `--chat-template`。
+已校验的原始证据位于 [`evidence/`](evidence/)。
 
 ## 架构边界
 
@@ -165,14 +122,13 @@ a3s-power (runtime owner)
   admission / batching / residency / speculative scheduling / integrity / TEE / API
 ```
 
-有一个居住等级。模型代码消耗由返回的权重
-电源并没有引入第二个专家缓存。每个打包的专家都留下来
-一个不透明的 `U8` SafeTensor to Power；这个箱子验证并解释了它的
-版本化标头和精确标量有效负载。
+驻留层级只有一个。模型代码消费 Power 返回的权重，不引入第二个专家 cache。
+对 Power 而言，每个打包专家仍是不透明的 `U8` SafeTensor；本 crate 校验并解释
+其带版本的头与精确标量载荷。
 
-请参阅[Architecture](docs/architecture.md)了解不变量和交付计划，
-和 [Model-neutral speculative decoding](docs/speculative-decoding.md) 为
-跨架构 DSpark 边界和接受门。
+不变量与交付计划见 [Architecture](docs/architecture.md)；
+跨架构 DSpark 边界与验收门见
+[Model-neutral speculative decoding](docs/speculative-decoding.md)。
 
 ## 开发
 
@@ -188,15 +144,13 @@ python tools/test_qwen3_5_moe_public_contract.py
 python tools/test_generate_qwen3_5_moe_public_oracle.py
 ```
 
-无需下载即可验证固定公共检查点的 3,219 个张量标头
-13.8 GB 有效负载：
+在不下载 13.8 GB 载荷的情况下，校验固定公开检查点的 3,219 个张量头：
 
 ```shell
 python tools/verify_hf_contract.py
 ```
 
-从准确的数据中生成并验证完整的公共检查点数字预言
-固定变形金刚结帐：
+从精确固定的 Transformers 检出生成并校验完整公开检查点数值 oracle：
 
 ```shell
 PYTHONPATH=/src/transformers/src python tools/generate_public_oracle.py \
@@ -206,20 +160,16 @@ cargo run --release --features validation --bin a3s-moe-validate -- \
   > olmoe-validation.json
 ```
 
-生成器拒绝 Transformers Git 签出，除了
-`918dbf131d0df5b46e3f6e1d96174d62aa4d16d6`，或 OLMoE 源文件，其
-SHA-256 与固定摘要不同。它还验证确切的字节长度
-以及修订版中每个检查点文件的 SHA-256
-加载模型之前的`6d84c48581ece794365f2b8e9cfb043c68ade9c5`。神谕
-绑定该清单并捕获每个提示 logit、路由器 logit、选定的
-专家和路线权重。验证器在出处、分词器上以非零值退出，
-argmax、路由或容差失败，并始终发出版本化 JSON 报告
-进行结构上有效的数值比较。
+生成器拒绝除 `918dbf131d0df5b46e3f6e1d96174d62aa4d16d6` 以外的 Transformers Git 检出，
+或 SHA-256 与固定摘要不符的 OLMoE 源文件。它还会在加载模型前校验修订
+`6d84c48581ece794365f2b8e9cfb043c68ade9c5` 中每个检查点文件的精确字节长度与 SHA-256。
+oracle 绑定该清单，并捕获每个 prompt logit、router logit、选中专家与路由权重。
+校验器在溯源、分词器、argmax、路由或容差失败时以非零退出，
+并始终为结构有效的数值比较发出带版本的 JSON 报告。
 
-下载准确的Qwen3-MoE预言机后生成独立的公共Qwen3-MoE预言机
-`Qwen/Qwen3-30B-A3B-Base` 修订已固定
-`tools/qwen3_moe_public_contract.py`，然后与打包后的进行比较
-动力流解码器：
+下载 `tools/qwen3_moe_public_contract.py` 中固定的精确
+`Qwen/Qwen3-30B-A3B-Base` 修订后，生成独立的公开 Qwen3-MoE oracle，
+再与打包的 Power 流式解码器比较：
 
 ```shell
 PYTHONPATH=/src/transformers/src python \
@@ -231,15 +181,14 @@ cargo run --release --features validation --bin a3s-moe-validate -- \
   --host-cache-mib 4096 > qwen3-moe-validation.json
 ```
 
-生成器固定模型修订版、所有 16 个分片字节长度和 SHA-256
-摘要，Transformers Git 修订版，其 Qwen3-MoE 源摘要，BF16
-参数存储与每操作CPU F32促销，热切关注和
-专家实现和输入令牌 ID。 Rust 验证器
-在比较每个文件之前重新散列这些文件和打包的源绑定
-捕获的 logit、路由器 logit、路由权重、所选专家和令牌 argmax。
+生成器固定模型修订、全部 16 个分片的字节长度与 SHA-256 摘要、
+Transformers Git 修订、其 Qwen3-MoE 源摘要、带每运算 CPU F32 提升的 BF16
+参数存储、eager 注意力与专家实现，以及输入 token ID。Rust 校验器在比较
+每个捕获的 logit、router logit、路由权重、选中专家与 token argmax 之前，
+重新哈希这些文件与打包源绑定。
 
-根据固定的确切修订版生成并验证 Qwen3.6 文本预言机
-`tools/qwen3_5_moe_public_contract.py`：
+从 `tools/qwen3_5_moe_public_contract.py` 中固定的精确修订生成并校验
+Qwen3.6 文本 oracle：
 
 ```shell
 PYTHONPATH=/src/transformers/src python \
@@ -251,15 +200,13 @@ cargo run --release --features validation --bin a3s-moe-validate -- \
   --host-cache-mib 4096 > qwen3.6-35b-a3b-validation.json
 ```
 
-预言机仅将官方的`model.language_model`命名空间加载到
-固定变形金刚`Qwen3_5MoeForCausalLM`，拒绝不完整的键映射，
-禁用可选内核，促进嵌入、线性和深度卷积
-F32 的操作，并捕获 logits 以及来自每个的标准化 Top-8 路由
-层。 Rust 验证器重新散列所有源文件，包括被忽略的文件
-在检查纯文本打包绑定之前，先检查视觉和 MTP 分片。
+oracle 仅将官方 `model.language_model` 命名空间加载到固定的 Transformers
+`Qwen3_5MoeForCausalLM`，拒绝不完整的键映射，禁用可选内核，
+将嵌入、线性与深度卷积运算提升到 F32，并捕获 logits 以及每层的归一化 Top-8 路由。
+Rust 校验器在检查仅文本打包绑定之前，重新哈希所有源文件，包括被忽略的
+vision 与 MTP 分片。
 
-转换下载的 Hugging Face 检查点而不缓冲完整的
-层或模型：
+转换已下载的 Hugging Face 检查点，而不缓冲完整层或完整模型：
 
 ```shell
 cargo run --release --bin a3s-moe-pack -- \
@@ -267,24 +214,19 @@ cargo run --release --bin a3s-moe-pack -- \
   --experts-per-file 8 --max-buffer-mib 512
 ```
 
-仅在转换和摘要验证之后才创建目标
-完成。该命令拒绝覆盖现有目标并发出
-JSON 转换报告包含观察到的峰值缓冲字节。上面写着
-来自已验证的源配置的`model_type`并接受`olmoe`，
-`qwen3_moe`和`qwen3_5_moe`。每个家庭都提供明确的电力资源
-限制：Qwen3-MoE 允许最多 64 GiB 的源或打包重量和 8,192
-安全张量文件，
-其中涵盖固定的 61 GB 检查点和最差支持的检查点
-每个文件一个专家打包，而不会削弱 Power 的全局默认设置。其
-每个张量 512M 范围涵盖 311,164,928 元素嵌入/头和
-402,653,184 元件融合栅极/向上导出。该系列的 24 GiB 状态绑定
-涵盖四个完整的 32K F32 KV 缓存（每个 6 GiB）。它的入口点驻留
-配置文件还允许 1 个有限的 4 GiB
-当前层专家联合，同时将并发读取保持在 512 MiB 以内；这个
-涵盖无损 F32 形式的所有 128 个公共模型专家。显式库
-加载期间策略永远不会扩大。在任何稠密张量之前
-实现后，其确切的目标 F32 尺寸与完整的尺寸一起被承认
-Power 驻留权重限制下的主机/设备专家缓存预算。例如：
+仅在转换与摘要校验完成后才创建目标。命令拒绝覆盖已有目标，
+并输出包含观察到的峰值缓冲字节的 JSON 转换报告。它从已校验的源配置读取
+`model_type`，并接受 `olmoe`、`qwen3_moe` 与 `qwen3_5_moe`。每个模型族提供显式的
+Power 资源限制：Qwen3-MoE 最多允许 64 GiB 源或打包权重与 8,192 个 SafeTensor 文件，
+足以覆盖固定的 61 GB 检查点以及最坏支持的每文件一专家打包，
+且不削弱 Power 的全局默认值。其每张量 512M 边界同时覆盖
+311,164,928 元素的嵌入/头与 402,653,184 元素的融合 gate/up 导出。
+该族的 24 GiB 状态边界覆盖四个完整的 32K F32 KV cache（各 6 GiB）。
+其入口驻留配置还允许一个有界的 4 GiB 当前层专家并集，
+同时将并发读取限制在 512 MiB 内；这覆盖全部 128 个公开模型专家的无损 F32 形式。
+显式库策略在加载期间绝不会被放宽。在物化任何稠密张量之前，
+其精确目标 F32 大小会与完整的主机/设备专家 cache 预算一起，
+在 Power 的驻留权重限制下被准入。例如：
 
 ```shell
 cargo run --release --bin a3s-moe-pack -- \
@@ -292,10 +234,9 @@ cargo run --release --bin a3s-moe-pack -- \
   --experts-per-file 8 --max-buffer-mib 512
 ```
 
-Qwen3.6文本转换使用相同的命令。其家族概况承认
-固定的 71.9 GB 源，所有 10,240 个可能的单专家打包文件，四个
-最大上下文混合缓存，以及完整的 256 专家 F32 层联合
-显式 80 GiB、16,384 个文件、48 GiB 状态和 4 GiB 暂存边界：
+Qwen3.6 文本转换使用同一命令。其模型族配置在显式的 80 GiB、16,384 文件、
+48 GiB 状态与 4 GiB 暂存边界下，准入固定的 71.9 GB 源、全部 10,240 个可能的
+每专家打包文件、四个最大上下文混合 cache，以及完整的 256 专家 F32 层并集：
 
 ```shell
 cargo run --release --bin a3s-moe-pack -- \
@@ -303,7 +244,7 @@ cargo run --release --bin a3s-moe-pack -- \
   --experts-per-file 8 --max-buffer-mib 512
 ```
 
-使用进程环境提供的密钥加密打包检查点：
+用进程环境提供的密钥加密打包检查点：
 
 ```shell
 export A3S_MOE_WEIGHT_KEY="$(openssl rand -hex 32)"
@@ -313,13 +254,11 @@ cargo run --release --bin a3s-moe-encrypt -- \
   > olmoe-encryption.json
 ```
 
-将发出的`manifestSha256`存储为检查点的带外信任
-锚。密集且专业的权重被加密； `config.json`、`manifest.json`、
-可选的标记生成器仍然是明文，但受 SHA-256 约束
-可信清单。加密和开放使用有界块并且从不发布
-解密的中间文件。
+将输出的 `manifestSha256` 存为检查点的带外信任锚。稠密与专家权重被加密；
+`config.json`、`manifest.json` 与可选分词器保持明文，但由该受信任清单以
+SHA-256 绑定。加密与打开使用有界分块，且从不发布解密中间文件。
 
-通过 Power 的 OpenAI 兼容 API 提供打包检查点：
+通过 Power 的 OpenAI 兼容 API 提供打包检查点服务：
 
 ```shell
 cargo run --release --features server --bin a3s-moe-server -- \
@@ -328,16 +267,14 @@ cargo run --release --features server --bin a3s-moe-server -- \
   --max-concurrent-requests 4
 ```
 
-服务器检测到`olmoe`、`qwen3_moe`或`qwen3_5_moe`
-检查点的有界`config.json`，注入相应的类型化后端，并注册一个
-进程本地清单。支持的采样控制有
+服务器从检查点的有界 `config.json` 检测 `olmoe`、`qwen3_moe` 或 `qwen3_5_moe`，
+注入对应的类型化后端，并注册进程本地清单。支持的采样控制为
 `temperature`、`top_p`、`top_k`、`min_p`、`seed`、`repeat_penalty`、
-`repeat_last_n`、`frequency_penalty`、`presence_penalty`。不支持
-模式、工具、结构化输出、交叉请求 KV 会话和后端
-旋钮在推理之前失败。
+`repeat_last_n`、`frequency_penalty` 与 `presence_penalty`。不支持的模态、工具、
+结构化输出、跨请求 KV 会话与后端旋钮会在推理前失败。
 
-通过相同的二进制文件提供打包的 Qwen3-MoE 检查点；省略
-`--model` 选择特定于架构的默认 `qwen3-moe` 标识符：
+通过同一二进制为打包的 Qwen3-MoE 检查点提供服务；省略 `--model` 时选择
+架构特定的默认标识符 `qwen3-moe`：
 
 ```shell
 cargo run --release --features server --bin a3s-moe-server -- \
@@ -345,7 +282,7 @@ cargo run --release --features server --bin a3s-moe-server -- \
   --host-cache-mib 512 --max-concurrent-requests 4
 ```
 
-对于 Qwen3.6，省略 `--model` 选择 `qwen3.6-35b-a3b`：
+对于 Qwen3.6，省略 `--model` 时选择 `qwen3.6-35b-a3b`：
 
 ```shell
 cargo run --release --features server --bin a3s-moe-server -- \
@@ -353,11 +290,10 @@ cargo run --release --features server --bin a3s-moe-server -- \
   --host-cache-mib 4096 --max-concurrent-requests 4
 ```
 
-加密服务加载目前仅适用于OLMoE机密
-检查点信封，并且 Qwen3-MoE 和 Qwen3.6 关闭失败。
+加密服务加载当前仅适用于 OLMoE 机密检查点信封，对 Qwen3-MoE 与 Qwen3.6
+失败关闭。
 
-通过提供其固定的信任锚和
-拥有密钥的环境变量：
+通过同时提供其固定信任锚与拥有密钥的环境变量来提供加密形式：
 
 ```shell
 cargo run --release --features server --bin a3s-moe-server -- \
@@ -366,13 +302,11 @@ cargo run --release --features server --bin a3s-moe-server -- \
   --encrypted-key-env A3S_MOE_WEIGHT_KEY
 ```
 
-生产机密主机应构建类型化加密源
-来自他们经过验证的钥匙释放机制。基于环境的 CLI 是一个
-避免命令行密钥暴露的操作员边界；它本身不是一个
-远程认证协议。
+生产机密主机应从其经证明的密钥释放机制构造类型化加密源。
+基于环境的 CLI 是避免命令行密钥暴露的运维边界；它本身不是远程证明协议。
 
-相同的图可以在功率解析加速器上运行。准确构建一个
-平台功能并显式选择类型设备：
+同一图可在 Power 解析的加速器上运行。精确构建一个平台特性并显式选择
+类型化设备：
 
 ```shell
 cargo run --release --features server,cuda --bin a3s-moe-server -- \
@@ -380,13 +314,11 @@ cargo run --release --features server,cuda --bin a3s-moe-server -- \
   --host-cache-mib 512 --device-cache-mib 4096
 ```
 
-Metal 在 macOS 上使用 `--features server,metal --device metal:0`。明确的
-如果后端或序号不可用，则 CUDA 或 Metal 请求将失败。 `auto`
-是唯一允许回退到 CPU 的模式，并且已解析的设备加上
-后备决策作为无内容服务/基准证据公开。
+Metal 在 macOS 上使用 `--features server,metal --device metal:0`。显式的 CUDA 或
+Metal 请求在该后端或序号不可用时失败。`auto` 是唯一允许回退到 CPU 的模式，
+解析后的设备与回退决策作为无内容的服务/基准证据暴露。
 
-生成原始的、可重复的性能证据，并可选择与
-独立子进程中完全驻留的 CPU 路径：
+生成原始、可复现的性能证据，并可选择在隔离子进程中与全驻留 CPU 路径比较：
 
 ```shell
 cargo run --release --features benchmark --bin a3s-moe-bench -- \
@@ -397,10 +329,8 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
   > olmoe-performance.json
 ```
 
-Qwen3-MoE 使用相同的工具和特定于家庭的证据模式。其
-公共奇偶校验门是固定的独立 F32 操作预言机
-BF16权重，所以故意省略了内存密集型常驻F32
-孩子：
+Qwen3-MoE 使用同一工具与模型族特定的证据模式。其公开一致性门是基于固定
+BF16 权重的独立 F32 运算 oracle，因此刻意省略内存密集的驻留 F32 子进程：
 
 ```shell
 cargo run --release --features benchmark --bin a3s-moe-bench -- \
@@ -410,7 +340,7 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
   > qwen3-moe-performance.json
 ```
 
-Qwen3.6 使用相同的证据边界和自己的版本化模式：
+Qwen3.6 使用同一证据边界与其自有带版本模式：
 
 ```shell
 cargo run --release --features benchmark --bin a3s-moe-bench -- \
@@ -420,7 +350,7 @@ cargo run --release --features benchmark --bin a3s-moe-bench -- \
   > qwen3.6-35b-a3b-performance.json
 ```
 
-检查的 CUDA 运行使用显式设备请求和有界设备缓存：
+已校验的 CUDA 运行使用显式设备请求与有界设备 cache：
 
 ```shell
 cargo run --release --features benchmark,cuda --bin a3s-moe-bench -- \
@@ -431,47 +361,39 @@ cargo run --release --features benchmark,cuda --bin a3s-moe-bench -- \
   > qwen3.6-35b-a3b-cuda-performance.json
 ```
 
-第一个示例以空的 Power Expert 缓存开始。温暖的样品保留
-仅配置的有界缓存。报告明确指出了运营
-系统页面缓存不受控制；它并不称这种情况为身体状况
-冷 I/O。检查的 Qwen3.6 CPU 工件报告`0.194616 tokens/s` 温暖
-意思是；检查的 CUDA 工件报告了 `0.263611 tokens/s` 暖平均值。参见
-[Performance Evidence](docs/performance.md) 为测量边界，
-比较规则。
+首个样本从空的 Power 专家 cache 开始。热样本仅保留配置的有界 cache。
+报告显式将操作系统页 cache 标注为不可控；它不将该条件称为物理冷 I/O。
+已校验的 Qwen3.6 CPU 产物报告热均值 `0.194616 tokens/s`；已校验的 CUDA 产物报告
+热均值 `0.263611 tokens/s`。测量边界与比较规则见
+[Performance Evidence](docs/performance.md)。
 
-CUDA 和 Metal 是互为平台特定的 Cargo 功能，因此可移植 CI
-使用 `--features server,benchmark,validation` 而不是 `--all-features`。
-CUDA 和 macOS 运行器必须分别编译和测试 `cuda` 和 `metal`。
+CUDA 与 Metal 是互斥的平台特定 Cargo 特性，因此可移植 CI 使用
+`--features server,benchmark,validation` 而非 `--all-features`。
+CUDA 与 macOS runner 必须分别编译并测试 `cuda` 与 `metal`。
 
-仅当有意更改固定模型时才重新生成微型预言机
-合同：
+仅在有意更改固定模型契约时重新生成 tiny oracle：
 
 ```shell
 python tools/generate_tiny_oracle.py
 ```
 
-生成器将 JSON 打印到标准输出，并且永远不会覆盖已检查的装置。
-在替换 `tests/fixtures/olmoe_tiny_oracle.json` 之前查看更改。
-同样的规则也适用于 `generate_full_model_oracle.py` 及其完整的
-解码器夹具。
+生成器将 JSON 打印到 stdout，从不覆盖已校验的 fixture。
+在替换 `tests/fixtures/olmoe_tiny_oracle.json` 前请审阅变更。
+同一规则适用于 `generate_full_model_oracle.py` 及其完整解码器 fixture。
 
-Qwen3-MoE 稀疏层和全解码器装置遵循相同的
-仅审阅工作流程：
+Qwen3-MoE 稀疏层与完整解码器 fixture 遵循相同的仅审阅工作流：
 
 ```shell
 python tools/generate_qwen3_moe_oracle.py
 python tools/generate_qwen3_moe_full_oracle.py
 ```
 
-M7现在提供常驻CPU参考推理，严格的官方拆分和
-融合导出器检查点加载、分词器集成、有界转换、
-强大的专家流媒体、路线联合连续批处理、服务
-组成，并为第二个家庭固定了公众接受工具。它
-重用 Power 的模型中立`RoutedExpertBatch`、经过验证的张量范围 I/O，
-生命周期和唯一的居住层次结构。固定的公共模型数值，
-并发HTTP，性能报告在`evidence/`下检查，所以
-CPU Qwen3-MoE 部署路径在修订版 `0146bd6` 中接受 Power
-修订`42c6646`。
+M7 现已为第二模型族提供驻留 CPU 参考推理、严格的官方拆分与融合导出
+检查点加载、分词器集成、有界转换、基于 Power 的专家流式传输、
+路由并集连续批处理、服务组合，以及固定的公开验收工具。它复用 Power 的
+模型无关 `RoutedExpertBatch`、已验证张量范围 I/O、生命周期与唯一驻留层级。
+固定的公开模型数值、并发 HTTP 与性能报告已校验于 `evidence/`，
+因此 CPU Qwen3-MoE 部署路径在修订 `0146bd6`（Power 修订 `42c6646`）下被接受。
 
 ## 许可证
 
