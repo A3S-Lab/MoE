@@ -1,5 +1,12 @@
 # A3S MoE
 
+<p>
+  <strong>Language / 语言:</strong>
+  <a href="README.md">English</a> ·
+  <a href="README.zh-CN.md">中文</a>
+</p>
+
+
 `a3s-moe` provides model-owned mixture-of-experts inference for
 [A3S Power](https://github.com/A3S-Lab/Power). Power remains responsible for
 model-neutral scheduling, weight residency, integrity, devices, and service
